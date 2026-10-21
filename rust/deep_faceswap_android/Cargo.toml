@@ -1,0 +1,20 @@
+[package]
+name = "deep_faceswap_android"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "deep_faceswap_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Image-only core: `default-features = false` drops the FFmpeg-backed `video`
+# feature so the crate cross-compiles cleanly for Android.
+deep_faceswap_core = { path = "../deep_faceswap_core", default-features = false }
+
+jni = "0.21"
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

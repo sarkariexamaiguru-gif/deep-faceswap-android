@@ -1,0 +1,23 @@
+# Rust
+rust/target/
+**/*.rs.bk
+Cargo.lock
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+
+# Generated native libraries (produced by cargo-ndk)
+android/app/src/main/jniLibs/
+
+# Models (large, downloaded separately)
+models/
+*.onnx
+*_emap.bin
+
+# OS
+.DS_Store

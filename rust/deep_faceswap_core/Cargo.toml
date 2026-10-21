@@ -1,0 +1,65 @@
+[package]
+name = "deep_faceswap_core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+# `video` is on by default for desktop builds. Android builds must pass
+# `--no-default-features` because the `video` feature pulls in `ffmpeg-next`,
+# which would need FFmpeg cross-compiled for every Android ABI.
+default = ["video"]
+video = ["dep:ffmpeg-next"]
+cuda = ["ort/cuda"]
+utoipa = ["dep:utoipa"]
+
+[dependencies]
+# Image processing
+image.workspace = true
+ndarray.workspace = true
+
+# Utilities
+rand = "0.8"
+rayon.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Video processing (optional — requires system FFmpeg)
+ffmpeg-next = { workspace = true, optional = true }
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# OpenAPI (optional, for API crate)
+utoipa = { workspace = true, optional = true }
+
+# ONNX Runtime.
+#
+# Android: use runtime dynamic loading is not needed — `ort` ships a statically
+# linked prebuilt ONNX Runtime for `aarch64-linux-android` (ONNX Runtime 1.24.2),
+# so we only need `download-binaries`. We switch the TLS backend to `rustls`
+# because `native-tls` (OpenSSL) is not available in the Android NDK toolchain.
+[target.'cfg(target_os = "android")'.dependencies]
+ort = { version = "2.0.0-rc.12", default-features = false, features = [
+    "std",
+    "ndarray",
+    "tracing",
+    "download-binaries",
+    "tls-rustls",
+    "copy-dylibs",
+    "api-24",
+] }
+
+# Desktop: keep upstream behaviour (native TLS).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+ort = { version = "2.0.0-rc.12", default-features = false, features = [
+    "std",
+    "ndarray",
+    "tracing",
+    "download-binaries",
+    "tls-native",
+    "copy-dylibs",
+    "api-24",
+] }
