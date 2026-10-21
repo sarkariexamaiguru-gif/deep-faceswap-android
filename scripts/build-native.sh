@@ -16,6 +16,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/android/app/src/main/jniLibs"
 ABI="arm64-v8a"
+TRIPLE="aarch64-linux-android"
 
 # Locate the NDK. cargo-ndk can find it on its own, but we need it here too so
 # we can copy libc++_shared.so out of it.
@@ -31,25 +32,36 @@ cargo ndk -t "$ABI" -o "$OUT" build --release -p deep_faceswap_android
 # Our cdylib links against libc++_shared.so (pulled in by ONNX Runtime's static
 # libraries). Android does not bundle it automatically, and without it
 # System.loadLibrary() fails with "library libc++_shared.so not found".
+# Note: the sysroot is keyed by the target triple, not the ABI name.
+STL=""
 if [ -n "$NDK" ] && [ -d "$NDK" ]; then
-    copied=""
     for tag in linux-x86_64 darwin-x86_64; do
-        STL="$NDK/toolchains/llvm/prebuilt/$tag/sysroot/usr/lib/$ABI/libc++_shared.so"
-        if [ -f "$STL" ]; then
-            mkdir -p "$OUT/$ABI"
-            cp "$STL" "$OUT/$ABI/"
-            echo "Copied libc++_shared.so from $STL"
-            copied="yes"
+        candidate="$NDK/toolchains/llvm/prebuilt/$tag/sysroot/usr/lib/$TRIPLE/libc++_shared.so"
+        if [ -f "$candidate" ]; then
+            STL="$candidate"
             break
         fi
     done
-    if [ -z "$copied" ]; then
-        echo "ERROR: could not find libc++_shared.so under $NDK" >&2
-        exit 1
+    # Fallback: search the NDK for any matching copy.
+    if [ -z "$STL" ]; then
+        STL="$(find "$NDK" -type f -name 'libc++_shared.so' -path "*$TRIPLE*" 2>/dev/null | head -n1 || true)"
     fi
+    if [ -z "$STL" ]; then
+        STL="$(find "$NDK" -type f -name 'libc++_shared.so' 2>/dev/null | head -n1 || true)"
+    fi
+fi
+
+if [ -n "$STL" ]; then
+    mkdir -p "$OUT/$ABI"
+    cp "$STL" "$OUT/$ABI/"
+    echo "Copied libc++_shared.so from $STL"
 else
-    echo "ERROR: Android NDK not found (set ANDROID_NDK_HOME)." >&2
-    echo "       libc++_shared.so is required or the app will crash on launch." >&2
+    echo "ERROR: could not locate libc++_shared.so in the NDK ($NDK)." >&2
+    echo "       Without it the app crashes on launch." >&2
+    if [ -n "$NDK" ] && [ -d "$NDK" ]; then
+        echo "       Candidates found:" >&2
+        find "$NDK" -name 'libc++*' 2>/dev/null | head -n 20 >&2 || true
+    fi
     exit 1
 fi
 
