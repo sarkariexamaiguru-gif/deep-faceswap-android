@@ -18,11 +18,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # GitHub's ubuntu runners ship with the Android SDK preinstalled, so we
+      # only need to add the NDK (the `android-actions/setup-android` action is
+      # deliberately avoided: it tries to install the long-removed `tools`
+      # package and fails).
       - name: Install Android NDK
-        run: sdkmanager "ndk;26.1.10909125"
+        run: |
+          set -e
+          SDKMGR="$(command -v sdkmanager || echo "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager")"
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          "$SDKMGR" "ndk;26.1.10909125"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -36,15 +41,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/**/Cargo.toml', 'rust/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/**/Cargo.toml') }}
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version '^3'
 
       - name: Build native library
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
-        run: bash scripts/build-native.sh
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/26.1.10909125"
+          bash scripts/build-native.sh
 
       - name: Build debug APK
         working-directory: android

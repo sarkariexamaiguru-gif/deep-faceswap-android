@@ -11,7 +11,6 @@ license.workspace = true
 # which would need FFmpeg cross-compiled for every Android ABI.
 default = ["video"]
 video = ["dep:ffmpeg-next"]
-cuda = ["ort/cuda"]
 utoipa = ["dep:utoipa"]
 
 [dependencies]
