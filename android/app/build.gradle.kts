@@ -58,19 +58,13 @@ dependencies {
 // into src/main/jniLibs/arm64-v8a. Skip with `-PskipRust=true` if you have
 // already built the native library (e.g. in CI, before invoking Gradle).
 // ---------------------------------------------------------------------------
-val rustProjectDir = rootProject.file("../rust")
-val jniLibsDir = file("src/main/jniLibs")
+val repoRoot = rootProject.file("..")
 
 val cargoNdkBuild by tasks.registering(Exec::class) {
     group = "rust"
-    description = "Cross-compile the Rust core for Android (arm64-v8a) via cargo-ndk."
-    workingDir = rustProjectDir
-    commandLine(
-        "cargo", "ndk",
-        "-t", "arm64-v8a",
-        "-o", jniLibsDir.absolutePath,
-        "build", "--release", "-p", "deep_faceswap_android",
-    )
+    description = "Cross-compile the Rust core and stage jniLibs via scripts/build-native.sh."
+    workingDir = repoRoot
+    commandLine("bash", "scripts/build-native.sh")
 }
 
 if (project.findProperty("skipRust") != "true") {
