@@ -107,7 +107,7 @@ as a build artifact.
 
 ## Models
 
-The engine needs these files (they are **not** committed — they are large):
+The engine needs these files:
 
 ```
 models/
@@ -119,20 +119,27 @@ models/
   inswapper_128_emap.bin    emap sidecar (512x512 f32) — required by the swapper
 ```
 
-Fetch and prepare them (desktop):
+The three buffalo_l models and `inswapper_128.onnx` are **not** committed (they
+are large). The 1 MB **emap sidecar is committed** at
+`android/app/src/main/assets/inswapper_128_emap.bin`, and the app copies it into
+place automatically on launch — so you never have to supply it by hand.
+
+Easiest path: install the app, tap **Check / download models**, and the four
+large models are fetched over the network while the emap is unpacked from the
+APK. You should end up with `Present: 5/5`.
+
+To prepare everything on a desktop instead:
 
 ```bash
 pip install onnx numpy
-bash scripts/prepare_models.sh
+bash scripts/prepare_models.sh      # downloads models + writes the emap
 ```
 
-Then either:
-
-- **Push to the device** with the `adb push` commands the script prints, or
-- Use the app's **Check / download models** button (downloads the buffalo_l
-  models and `inswapper_128.onnx`; the emap still has to be supplied), or
-- Drop `inswapper_128_emap.bin` into `android/app/src/main/assets/` so the app
-  copies it out on first launch.
+`prepare_models.sh` prints the `adb push` commands to sideload the models onto a
+device. Note that not every inswapper build names the emap tensor `emap` — the
+common `inswapper_128_fp16.onnx` calls it `initializer` — so `extract_emap.py`
+locates it by name first and otherwise falls back to the unique 512x512 float32
+initialiser.
 
 Models are read from `filesDir/models` (i.e.
 `/data/data/com.deepfaceswap.android/files/models`).
