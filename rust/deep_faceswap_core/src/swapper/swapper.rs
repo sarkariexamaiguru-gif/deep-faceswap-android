@@ -309,7 +309,7 @@ impl FaceSwapper {
             .session
             .outputs()
             .first()
-            .map(|output| output.name.clone())
+            .map(|output| output.name().to_string())
             .ok_or_else(|| FaceSwapError::Ort("swapper model declares no outputs".to_string()))?;
 
         let swapped = {
