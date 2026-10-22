@@ -31,8 +31,9 @@ pub mod video;
 pub mod verbose;
 
 pub use swap::{
-    swap_faces, swap_faces_reporting, swap_single_pair, swap_single_pair_opts,
-    swap_with_mappings, SwapOptions, SwapStage,
+    detect_faces_for_mapping, swap_faces, swap_faces_mapped, swap_faces_reporting,
+    swap_single_pair, swap_single_pair_opts, swap_with_mappings, MappingFace, MappingFaces,
+    SwapOptions, SwapStage, MAX_PIXEL_BOOST,
 };
 #[cfg(feature = "video")]
 pub use swap::{swap_video, swap_video_frames_single, swap_video_frames_with_mappings};

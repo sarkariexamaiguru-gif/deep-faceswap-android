@@ -46,6 +46,9 @@ pub enum SwapStage {
     Done = 5,
 }
 
+/// Highest supported pixel-boost grid. 8 x 128 = 1024px, i.e. 64 model passes.
+pub const MAX_PIXEL_BOOST: u32 = 8;
+
 /// Callback signature: `(stage, faces_done, faces_total)`.
 pub type StageCallback<'a> = &'a mut dyn FnMut(SwapStage, usize, usize);
 
@@ -60,7 +63,8 @@ pub struct SwapOptions {
     pub use_mouth_mask: bool,
     /// Map the source face onto every detected target face.
     pub use_multi_face: bool,
-    /// Pixel boost grid: 1 = 128px, 2 = 256, 3 = 384, 4 = 512. Clamped to 1..=4.
+    /// Pixel boost grid: 1 = 128px, 2 = 256, 3 = 384, 4 = 512, 6 = 768, 8 = 1024.
+    /// Clamped to 1..=8. Cost scales with the square of this value.
     pub pixel_boost: u32,
     /// How much of the restored face to keep: 0.0 untouched, 1.0 full restore.
     pub enhancer_strength: f32,
@@ -153,7 +157,7 @@ pub fn swap_single_pair_opts(
     // Pixel boost: inswapper always runs at 128 internally. Aligning larger and
     // running the model over an interleaved NxN grid of 128px sub-images gives a
     // sharper result at N^2 passes (2 => 256, 3 => 384, 4 => 512).
-    let grid = opts.pixel_boost.clamp(1, 4) as usize;
+    let grid = opts.pixel_boost.clamp(1, MAX_PIXEL_BOOST) as usize;
     let swap_size = 128 * grid as u32;
 
     log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
@@ -309,6 +313,105 @@ pub fn swap_with_mappings(
     Ok(start_time.elapsed().as_secs_f64())
 }
 
+/// Images and faces loaded for a swap.
+struct LoadedImages {
+    source_images: Vec<Array3<u8>>,
+    all_source_faces: Vec<SourceFaceInfo>,
+    target_array: Array3<u8>,
+    target_faces: Vec<DetectedFace>,
+}
+
+/// Load the source image(s) and the target, detecting faces in both.
+///
+/// Shared by the automatic and the explicitly-mapped swap paths.
+fn load_and_detect(
+    detector: &mut FaceDetector,
+    source_path: &str,
+    target_path: &str,
+    on_stage: StageCallback,
+) -> Result<LoadedImages> {
+    on_stage(SwapStage::LoadingSource, 0, 0);
+
+    let action_start = Instant::now();
+    let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+    let mut source_images: Vec<Array3<u8>> = Vec::new();
+    let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
+
+    for (img_idx, path) in source_paths.iter().enumerate() {
+        log_additional!("load_image", "Loading source image", path = path);
+
+        let img = img_io::load_image(path)?;
+        let rgb = img_io::to_rgb8(&img);
+        let array = rgb::rgb_to_array3(&rgb);
+
+        let detect_start = Instant::now();
+        let faces = detector.detect(&array, 0.5, 0.4)?;
+
+        if faces.is_empty() {
+            log_main!("warn", "No faces detected in source image", path = path);
+        } else {
+            log_main!(
+                EVENT_FACE_DETECTED,
+                "Detected faces in source image",
+                path = path,
+                count = faces.len(),
+                elapsed_s = detect_start.elapsed().as_secs_f64()
+            );
+
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+
+            for face in faces {
+                all_source_faces.push(SourceFaceInfo {
+                    face,
+                    source_image_index: img_idx,
+                    source_filename: filename.to_string(),
+                });
+            }
+        }
+
+        source_images.push(array);
+    }
+
+    if all_source_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+
+    log_main!(
+        "load_source",
+        "Loading source images complete",
+        count = all_source_faces.len(),
+        elapsed_s = action_start.elapsed().as_secs_f64()
+    );
+
+    on_stage(SwapStage::DetectingFaces, 0, 0);
+
+    let action_start = Instant::now();
+    let target_img = img_io::load_image(target_path)?;
+    let target_rgb = img_io::to_rgb8(&target_img);
+    let target_array = rgb::rgb_to_array3(&target_rgb);
+
+    let target_faces = detector.detect(&target_array, 0.5, 0.4)?;
+    if target_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+    log_main!(
+        "load_target",
+        "Loading target image complete",
+        count = target_faces.len(),
+        elapsed_s = action_start.elapsed().as_secs_f64()
+    );
+
+    Ok(LoadedImages {
+        source_images,
+        all_source_faces,
+        target_array,
+        target_faces,
+    })
+}
+
 /// Swap a face from a source image into a target image.
 ///
 /// This is the image entry point the Android app uses. Multi-face mode maps the
@@ -403,79 +506,12 @@ pub fn swap_faces_reporting(
         None
     };
 
-    on_stage(SwapStage::LoadingSource, 0, 0);
-
-    let action_start = Instant::now();
-    let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
-    let mut source_images: Vec<Array3<u8>> = Vec::new();
-    let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
-
-    for (img_idx, path) in source_paths.iter().enumerate() {
-        log_additional!("load_image", "Loading source image", path = path);
-
-        let img = img_io::load_image(path)?;
-        let rgb = img_io::to_rgb8(&img);
-        let array = rgb::rgb_to_array3(&rgb);
-
-        let detect_start = Instant::now();
-        let faces = detector.detect(&array, 0.5, 0.4)?;
-
-        if faces.is_empty() {
-            log_main!("warn", "No faces detected in source image", path = path);
-        } else {
-            log_main!(
-                EVENT_FACE_DETECTED,
-                "Detected faces in source image",
-                path = path,
-                count = faces.len(),
-                elapsed_s = detect_start.elapsed().as_secs_f64()
-            );
-
-            let filename = std::path::Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(path);
-
-            for face in faces {
-                all_source_faces.push(SourceFaceInfo {
-                    face,
-                    source_image_index: img_idx,
-                    source_filename: filename.to_string(),
-                });
-            }
-        }
-
-        source_images.push(array);
-    }
-
-    if all_source_faces.is_empty() {
-        return Err(FaceSwapError::NoFacesDetected);
-    }
-
-    log_main!(
-        "load_source",
-        "Loading source images complete",
-        count = all_source_faces.len(),
-        elapsed_s = action_start.elapsed().as_secs_f64()
-    );
-
-    on_stage(SwapStage::DetectingFaces, 0, 0);
-
-    let action_start = Instant::now();
-    let target_img = img_io::load_image(target_path)?;
-    let target_rgb = img_io::to_rgb8(&target_img);
-    let target_array = rgb::rgb_to_array3(&target_rgb);
-
-    let target_faces = detector.detect(&target_array, 0.5, 0.4)?;
-    if target_faces.is_empty() {
-        return Err(FaceSwapError::NoFacesDetected);
-    }
-    log_main!(
-        "load_target",
-        "Loading target image complete",
-        count = target_faces.len(),
-        elapsed_s = action_start.elapsed().as_secs_f64()
-    );
+    let LoadedImages {
+        source_images,
+        all_source_faces,
+        target_array,
+        target_faces,
+    } = load_and_detect(&mut detector, source_path, target_path, &mut *on_stage)?;
 
     let mut result = target_array.clone();
 
@@ -1096,4 +1132,207 @@ pub fn swap_video_frames_single(
     );
 
     Ok(())
+}
+
+/// Swap faces using explicit source -> target mappings.
+///
+/// This is what the app's manual mapping UI calls: the user pairs each source
+/// face with a target face and the pairs arrive here as `(source, target)`
+/// indices, in detection order (highest score first).
+#[allow(clippy::too_many_arguments)]
+pub fn swap_faces_mapped(
+    source_path: &str,
+    target_path: &str,
+    output_path: &str,
+    detector_model: &str,
+    recognizer_model: &str,
+    swapper_model: &str,
+    enhancer_model: Option<&str>,
+    landmark_model: Option<&str>,
+    opts: SwapOptions,
+    mappings: &[(usize, usize)],
+    on_stage: StageCallback,
+) -> Result<()> {
+    log_main!(
+        "swap_init",
+        "Initializing mapped face swap",
+        source = source_path,
+        target = target_path,
+        output = output_path,
+        pairs = mappings.len()
+    );
+
+    on_stage(SwapStage::LoadingModels, 0, 0);
+    let mut detector = FaceDetector::new(detector_model)?;
+    let mut recognizer = FaceRecognizer::new(recognizer_model)?;
+    let mut swapper = FaceSwapper::new(swapper_model)?;
+    let mut enhancer = enhancer_model
+        .map(|path| FaceEnhancer::new(path))
+        .transpose()?;
+    let mut landmark_detector = if opts.use_mouth_mask {
+        let path = landmark_model.ok_or_else(|| {
+            FaceSwapError::InvalidInput(
+                "Landmark model path required when mouth mask is enabled".to_string(),
+            )
+        })?;
+        Some(LandmarkDetector::new(path)?)
+    } else {
+        None
+    };
+
+    let LoadedImages {
+        source_images,
+        all_source_faces,
+        target_array,
+        target_faces,
+    } = load_and_detect(&mut detector, source_path, target_path, &mut *on_stage)?;
+
+    // Validate the requested pairs against what was actually detected, so a
+    // stale index from the UI can never index out of bounds.
+    let mut pairs = Vec::with_capacity(mappings.len());
+    for &(source_idx, target_idx) in mappings {
+        if source_idx >= all_source_faces.len() || target_idx >= target_faces.len() {
+            return Err(FaceSwapError::InvalidInput(format!(
+                "Face mapping {}:{} is out of range ({} source faces, {} target faces)",
+                source_idx,
+                target_idx,
+                all_source_faces.len(),
+                target_faces.len()
+            )));
+        }
+        pairs.push(crate::types::FaceMapping {
+            source_idx,
+            target_idx,
+        });
+    }
+    if pairs.is_empty() {
+        return Err(FaceSwapError::InvalidInput(
+            "No face mappings supplied".to_string(),
+        ));
+    }
+
+    let mut result = target_array.clone();
+    let elapsed_s = swap_with_mappings(
+        &all_source_faces,
+        &target_faces,
+        &source_images,
+        &mut result,
+        &pairs,
+        &mut recognizer,
+        &mut swapper,
+        &mut enhancer,
+        &mut landmark_detector,
+        opts,
+        on_stage,
+    )?;
+    log_main!(
+        "face_swap",
+        "Mapped face swap complete",
+        faces = pairs.len(),
+        elapsed_s = elapsed_s
+    );
+
+    on_stage(SwapStage::Saving, 0, 0);
+    let result_img = rgb::array3_to_rgb(&result);
+    img_io::save_image(&result_img, output_path)?;
+
+    log_main!(EVENT_COMPLETE, "Face swap completed successfully");
+    on_stage(SwapStage::Done, 0, 0);
+    Ok(())
+}
+
+/// One face offered to the manual mapping UI.
+pub struct MappingFace {
+    /// Index in detection order (highest score first) — what a mapping refers to.
+    pub index: usize,
+    /// Detection confidence.
+    pub score: f32,
+    /// Bounding box in the original image: `[x1, y1, x2, y2]`.
+    pub bbox: [f32; 4],
+    /// Path to a cropped image of this face, written under `crops_dir`.
+    pub crop_path: String,
+}
+
+/// Faces detected for the manual mapping UI, with a crop image for each.
+pub struct MappingFaces {
+    pub source: Vec<MappingFace>,
+    pub target: Vec<MappingFace>,
+}
+
+/// Detect faces in the source(s) and the target and save a crop of each to
+/// `crops_dir/{source,target}/` so a UI can show them for pairing.
+pub fn detect_faces_for_mapping(
+    source_path: &str,
+    target_path: &str,
+    detector_model: &str,
+    crops_dir: &str,
+) -> Result<MappingFaces> {
+    let mut detector = FaceDetector::new(detector_model)?;
+
+    let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+    let mut source_images: Vec<Array3<u8>> = Vec::new();
+    let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
+
+    for (img_idx, path) in source_paths.iter().enumerate() {
+        let img = img_io::load_image(path)?;
+        let rgb = img_io::to_rgb8(&img);
+        let array = rgb::rgb_to_array3(&rgb);
+        let faces = detector.detect(&array, 0.5, 0.4)?;
+
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+
+        for face in faces {
+            all_source_faces.push(SourceFaceInfo {
+                face,
+                source_image_index: img_idx,
+                source_filename: filename.to_string(),
+            });
+        }
+        source_images.push(array);
+    }
+
+    if all_source_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+
+    let source_crops = multi_face::save_face_crops_from_infos_to(
+        &all_source_faces,
+        &source_images,
+        &format!("{}/source", crops_dir),
+    )?;
+
+    let target_img = img_io::load_image(target_path)?;
+    let target_rgb = img_io::to_rgb8(&target_img);
+    let target_array = rgb::rgb_to_array3(&target_rgb);
+    let target_faces = detector.detect(&target_array, 0.5, 0.4)?;
+    if target_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+
+    let target_crops = multi_face::save_face_crops_to(&target_faces, &target_array, false, crops_dir)?;
+
+    Ok(MappingFaces {
+        source: to_mapping_faces(source_crops),
+        target: to_mapping_faces(target_crops),
+    })
+}
+
+fn to_mapping_faces(crops: Vec<crate::types::FaceCropInfo>) -> Vec<MappingFace> {
+    crops
+        .into_iter()
+        .map(|crop| MappingFace {
+            index: crop.index,
+            score: crop.face.det_score,
+            bbox: [
+                crop.face.bbox.x1,
+                crop.face.bbox.y1,
+                crop.face.bbox.x2,
+                crop.face.bbox.y2,
+            ],
+            crop_path: crop.crop_path,
+        })
+        .collect()
 }

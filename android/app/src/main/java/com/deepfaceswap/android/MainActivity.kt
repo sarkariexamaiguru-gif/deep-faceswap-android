@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
@@ -22,6 +23,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -73,7 +75,6 @@ class MainActivity : Activity() {
     private lateinit var targetHint: View
     private lateinit var targetCaption: TextView
     private lateinit var mouthMask: Switch
-    private lateinit var multiFace: Switch
     private lateinit var startButton: Button
     private lateinit var progress: ProgressBar
     private lateinit var stageLabel: TextView
@@ -91,6 +92,19 @@ class MainActivity : Activity() {
     private lateinit var strengthLabel: TextView
     private lateinit var strengthBar: SeekBar
     private lateinit var enhancerSwitch: Switch
+
+    // multi-face mode: 0 = off, 1 = swap every face, 2 = map manually
+    private var multiFaceMode = 1
+    private val modeChips = mutableListOf<TextView>()
+
+    // manual mapping
+    private var detectedFaces: NativeBridge.FaceOptions? = null
+    private var activeSourceIndex = 0
+    private val mappings = mutableListOf<Pair<Int, Int>>()
+    private lateinit var mappingCard: LinearLayout
+    private lateinit var mappingStatus: TextView
+    private lateinit var sourceCrops: LinearLayout
+    private lateinit var targetCrops: LinearLayout
     private lateinit var resultPreview: ImageView
     private lateinit var logView: TextView
 
@@ -241,6 +255,23 @@ class MainActivity : Activity() {
         col.addView(targetCaption)
 
         col.addView(caption("Swap options live in Settings \u203A Quality"))
+
+        mappingCard = card().apply { visibility = View.GONE }
+        mappingCard.addView(sectionLabel("FACE MAPPING"))
+        mappingStatus = TextView(this).apply {
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 13f
+            setLineSpacing(dp(3).toFloat(), 1f)
+        }
+        mappingCard.addView(mappingStatus)
+        mappingCard.addView(primaryButton("Detect faces") { detectFacesForMapping() })
+        mappingCard.addView(sectionLabel("SOURCE FACES"))
+        sourceCrops = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        mappingCard.addView(hScroll(sourceCrops))
+        mappingCard.addView(sectionLabel("TARGET FACES"))
+        targetCrops = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        mappingCard.addView(hScroll(targetCrops))
+        col.addView(mappingCard)
 
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -433,7 +464,7 @@ class MainActivity : Activity() {
         col.addView(sectionLabel("PIPELINE PRESET"))
         val presetCard = card()
         presetCard.addView(
-            chipRow(listOf("Fast", "Balanced", "Quality", "Max"), presetChips) { applyPreset(it) }
+            chipGrid(PRESETS, presetChips, 3) { applyPreset(it) }
         )
         costLabel = TextView(this).apply {
             setTextColor(getColor(R.color.text_dim))
@@ -446,7 +477,7 @@ class MainActivity : Activity() {
         col.addView(sectionLabel("PIXEL BOOST"))
         val boostCard = card()
         boostCard.addView(
-            chipRow(listOf("128", "256", "384", "512"), boostChips) { setBoost(it + 1) }
+            chipGrid(BOOST_LABELS, boostChips, 3) { setBoost(it) }
         )
         boostCard.addView(TextView(this).apply {
             text = "The swapper always runs at 128px internally. Above that the face is " +
@@ -519,12 +550,25 @@ class MainActivity : Activity() {
             false,
         )
         options.addView(divider())
-        multiFace = addToggle(
-            options,
-            "Swap every face",
-            "Swap all detected faces, not just the largest",
-            false,
-        )
+
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        modeRow.addView(TextView(this).apply {
+            text = "Faces to swap"
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
+        })
+        modeRow.addView(TextView(this).apply {
+            text = "Off swaps only the largest face. Manual lets you pair each source " +
+                "face with a target face."
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 13f
+            setPadding(0, dp(2), 0, dp(8))
+        })
+        modeRow.addView(chipGrid(listOf("Off", "Swap all", "Manual"), modeChips, 3) { setMultiFaceMode(it) })
+        options.addView(modeRow)
         col.addView(options)
 
         syncPipelineUi()
@@ -533,29 +577,44 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------- pipeline --
 
-    private fun chipRow(
+    /** Chips laid out in rows of [perRow]; [onSelect] gets the flat index. */
+    private fun chipGrid(
         labels: List<String>,
         store: MutableList<TextView>,
+        perRow: Int,
         onSelect: (Int) -> Unit,
     ): LinearLayout {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         store.clear()
-        labels.forEachIndexed { i, name ->
-            val chip = TextView(this).apply {
-                text = name
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setPadding(dp(4), dp(10), dp(4), dp(10))
-                layoutParams = LinearLayout.LayoutParams(0, wc, 1f).apply {
-                    if (i > 0) marginStart = dp(6)
-                }
-                isClickable = true
-                setOnClickListener { onSelect(i) }
+        labels.chunked(perRow).forEachIndexed { rowIndex, chunk ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                if (rowIndex > 0) setPadding(0, dp(6), 0, 0)
             }
-            store.add(chip)
-            row.addView(chip)
+            chunk.forEachIndexed { colIndex, name ->
+                val flatIndex = rowIndex * perRow + colIndex
+                val chip = TextView(this).apply {
+                    text = name
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(4), dp(10), dp(4), dp(10))
+                    layoutParams = LinearLayout.LayoutParams(0, wc, 1f).apply {
+                        if (colIndex > 0) marginStart = dp(6)
+                    }
+                    isClickable = true
+                    setOnClickListener { onSelect(flatIndex) }
+                }
+                store.add(chip)
+                row.addView(chip)
+            }
+            container.addView(row)
         }
-        return row
+        return container
+    }
+
+    private fun hScroll(inner: View): HorizontalScrollView = HorizontalScrollView(this).apply {
+        isHorizontalScrollBarEnabled = false
+        addView(inner)
     }
 
     private fun paintChips(chips: List<TextView>, selected: Int) {
@@ -571,14 +630,21 @@ class MainActivity : Activity() {
             0 -> { presetName = "Fast"; pixelBoost = 1; enhancerOn = false; enhancerStrength = 0.0f }
             1 -> { presetName = "Balanced"; pixelBoost = 2; enhancerOn = true; enhancerStrength = 0.75f }
             2 -> { presetName = "Quality"; pixelBoost = 3; enhancerOn = true; enhancerStrength = 0.80f }
-            else -> { presetName = "Max"; pixelBoost = 4; enhancerOn = true; enhancerStrength = 0.90f }
+            3 -> { presetName = "Max"; pixelBoost = 4; enhancerOn = true; enhancerStrength = 0.90f }
+            else -> { presetName = "Custom" }
         }
         syncPipelineUi()
     }
 
-    private fun setBoost(boost: Int) {
-        pixelBoost = boost
+    private fun setBoost(chipIndex: Int) {
+        pixelBoost = BOOST_GRIDS.getOrElse(chipIndex) { 2 }
         markCustom()
+        syncPipelineUi()
+    }
+
+    private fun setMultiFaceMode(index: Int) {
+        multiFaceMode = index
+        if (index != 2) clearMapping()
         syncPipelineUi()
     }
 
@@ -589,9 +655,13 @@ class MainActivity : Activity() {
     /** Push the pipeline state into every control. Guarded so it cannot re-enter. */
     private fun syncPipelineUi() {
         syncing = true
-        val presetIndex = listOf("Fast", "Balanced", "Quality", "Max").indexOf(presetName)
+        val presetIndex = PRESETS.indexOf(presetName)
         paintChips(presetChips, presetIndex)
-        paintChips(boostChips, pixelBoost - 1)
+        paintChips(boostChips, BOOST_GRIDS.indexOf(pixelBoost))
+        paintChips(modeChips, multiFaceMode)
+        if (::mappingCard.isInitialized) {
+            mappingCard.visibility = if (multiFaceMode == 2) View.VISIBLE else View.GONE
+        }
         if (::enhancerSwitch.isInitialized) enhancerSwitch.isChecked = enhancerOn
         if (::strengthBar.isInitialized) {
             strengthBar.progress = (enhancerStrength * 100).toInt()
@@ -614,6 +684,110 @@ class MainActivity : Activity() {
         val restore = if (enhancerOn) " + restore" else ""
         val factor = String.format(Locale.US, "%.1f", relative)
         return "$presetName \u00B7 $passes swap $plural$restore \u00B7 ~${factor}\u00D7 the 128px baseline"
+    }
+
+    // ------------------------------------------------------ face mapping (P4) --
+
+    private fun clearMapping() {
+        detectedFaces = null
+        mappings.clear()
+        activeSourceIndex = 0
+        if (::sourceCrops.isInitialized) {
+            sourceCrops.removeAllViews()
+            targetCrops.removeAllViews()
+        }
+        if (::mappingStatus.isInitialized) {
+            mappingStatus.text = "No faces detected yet \u2014 tap Detect faces."
+        }
+    }
+
+    private fun detectFacesForMapping() {
+        val target = targetFile
+        if (sourceFiles.isEmpty() || target == null) {
+            toast("Pick a source and a target first")
+            return
+        }
+
+        // Fresh directory each time so a stale crop can never be shown.
+        val cropsDir = File(cacheDir, "faces")
+        cropsDir.deleteRecursively()
+        cropsDir.mkdirs()
+
+        setBusy(true, "Detecting faces \u2026")
+        val sources = sourceFiles.map { it.absolutePath }
+        Thread {
+            val faces = NativeBridge.detectFaces(this, sources, target.absolutePath, cropsDir.absolutePath)
+            io.post {
+                setBusy(false, null)
+                if (faces == null) {
+                    log("Face detection failed.")
+                    toast("Detection failed")
+                    return@post
+                }
+                detectedFaces = faces
+                mappings.clear()
+                activeSourceIndex = faces.source.firstOrNull()?.index ?: 0
+                renderMappingFaces()
+            }
+        }.start()
+    }
+
+    private fun renderMappingFaces() {
+        if (!::sourceCrops.isInitialized) return
+        sourceCrops.removeAllViews()
+        targetCrops.removeAllViews()
+
+        val faces = detectedFaces
+        if (faces == null) {
+            mappingStatus.text = "No faces detected yet \u2014 tap Detect faces."
+            return
+        }
+        if (faces.source.isEmpty() || faces.target.isEmpty()) {
+            mappingStatus.text = "Found ${faces.source.size} source and ${faces.target.size} target faces."
+            return
+        }
+
+        faces.source.forEach { addFaceChip(sourceCrops, it, isSource = true) }
+        faces.target.forEach { addFaceChip(targetCrops, it, isSource = false) }
+        mappingStatus.text = mappingStatusText(faces)
+    }
+
+    private fun mappingStatusText(faces: NativeBridge.FaceOptions): String {
+        val pairs = if (mappings.isEmpty()) {
+            "none yet"
+        } else {
+            mappings.joinToString(", ") { "${it.first}\u2192${it.second}" }
+        }
+        return "Active source #$activeSourceIndex of ${faces.source.size} source \u00B7 " +
+            "${faces.target.size} target\nTap a target face to pair it. Pairs: $pairs"
+    }
+
+    private fun addFaceChip(parent: LinearLayout, face: NativeBridge.FaceOption, isSource: Boolean) {
+        val selected = isSource && face.index == activeSourceIndex
+        val box = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(66), dp(66)).apply { marginEnd = dp(8) }
+            background = getDrawable(R.drawable.bg_card_inner)
+            if (selected) foreground = getDrawable(R.drawable.bg_face_ring)
+            alpha = if (isSource && !selected) 0.55f else 1f
+            isClickable = true
+            setOnClickListener { onFaceTapped(face, isSource) }
+        }
+        box.addView(ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(mp, mp)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            BitmapFactory.decodeFile(face.cropPath)?.let { setImageBitmap(it) }
+        })
+        parent.addView(box)
+    }
+
+    private fun onFaceTapped(face: NativeBridge.FaceOption, isSource: Boolean) {
+        if (isSource) {
+            activeSourceIndex = face.index
+        } else {
+            val pair = activeSourceIndex to face.index
+            if (!mappings.remove(pair)) mappings.add(pair)
+        }
+        renderMappingFaces()
     }
 
     private fun buildModelsPage(): View {
@@ -955,6 +1129,7 @@ class MainActivity : Activity() {
                 // best effort — leaving the capture in the gallery is harmless
             }
             if (file == null) return
+            clearMapping()
             if (pendingCameraIsSource) {
                 sourceFiles.clear()
                 sourceFiles.add(file)
@@ -978,12 +1153,14 @@ class MainActivity : Activity() {
         val copied = uris.mapNotNull { copyToCache(it) }
         when (requestCode) {
             REQ_SOURCE -> {
+                clearMapping()
                 sourceFiles.clear()
                 sourceFiles.addAll(copied)
                 copied.firstOrNull()?.let { showPreview(sourcePreview, sourceHint, it) }
                 sourceCaption.text = "Source: ${sourceFiles.joinToString(", ") { it.name }}"
             }
             REQ_TARGET -> {
+                clearMapping()
                 targetFile = copied.firstOrNull()
                 targetFile?.let { showPreview(targetPreview, targetHint, it) }
                 targetCaption.text = "Target: ${targetFile?.name ?: "?"}"
@@ -1022,6 +1199,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- swap --
 
     private fun reset() {
+        clearMapping()
         sourceFiles.clear()
         targetFile = null
         sourcePreview.setImageDrawable(null)
@@ -1055,6 +1233,10 @@ class MainActivity : Activity() {
         if (enhancerOn && !models.enhancerInstalled) {
             log("Restore is on but the enhancer isn't downloaded — swapping without it.")
         }
+        if (multiFaceMode == 2 && mappings.isEmpty()) {
+            toast("Map at least one source → target face")
+            return
+        }
 
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
@@ -1062,17 +1244,35 @@ class MainActivity : Activity() {
 
         setBusy(true, "Swapping …")
         startProgressPolling()
+        val useMouthMask = mouthMask.isChecked
+        val strength = if (enhancerOn) enhancerStrength else 1.0f
+        val manualPairs = mappings.toList()
+        val manual = multiFaceMode == 2
+        val sources = sourceFiles.map { it.absolutePath }
         Thread {
-            val result = NativeBridge.swap(
-                this,
-                sourceFiles.map { it.absolutePath },
-                target.absolutePath,
-                output.absolutePath,
-                mouthMask.isChecked,
-                multiFace.isChecked,
-                pixelBoost,
-                if (enhancerOn) enhancerStrength else 1.0f,
-            )
+            val result = if (manual) {
+                NativeBridge.swapMapped(
+                    this,
+                    sources,
+                    target.absolutePath,
+                    output.absolutePath,
+                    manualPairs,
+                    useMouthMask,
+                    pixelBoost,
+                    strength,
+                )
+            } else {
+                NativeBridge.swap(
+                    this,
+                    sources,
+                    target.absolutePath,
+                    output.absolutePath,
+                    useMouthMask,
+                    multiFaceMode == 1,
+                    pixelBoost,
+                    strength,
+                )
+            }
             io.post {
                 stopProgressPolling()
                 setBusy(false, null)
@@ -1181,7 +1381,10 @@ class MainActivity : Activity() {
     // -------------------------------------------------------------- helpers --
 
     private fun setBusy(busy: Boolean, message: String?) {
-        if (::progress.isInitialized) progress.visibility = if (busy) View.VISIBLE else View.GONE
+        if (::progress.isInitialized) {
+            progress.visibility = if (busy) View.VISIBLE else View.GONE
+            if (busy && !polling) progress.progress = 0
+        }
         if (::stageLabel.isInitialized) stageLabel.visibility = if (busy) View.VISIBLE else View.GONE
         if (::startButton.isInitialized) {
             startButton.isEnabled = !busy
@@ -1203,6 +1406,13 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.5.0"
+        const val APP_VERSION = "0.6.0"
+
+        /** Preset chip labels; the last one is a state, not a value set. */
+        val PRESETS = listOf("Fast", "Balanced", "Quality", "Max", "Custom")
+
+        /** Pixel-boost chip labels and the grid each one maps to. */
+        val BOOST_LABELS = listOf("128", "256", "384", "512", "768", "1024")
+        val BOOST_GRIDS = listOf(1, 2, 3, 4, 6, 8)
     }
 }

@@ -14,7 +14,7 @@ use jni::sys::{jboolean, jfloat, jint, jstring};
 use jni::JNIEnv;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use deep_faceswap_core::swap::{SwapOptions, SwapStage};
+use deep_faceswap_core::swap::{SwapOptions, SwapStage, MAX_PIXEL_BOOST};
 
 /// Latest progress stage, polled from Kotlin while the swap runs on a worker
 /// thread. `-1` means "no swap in flight".
@@ -47,7 +47,7 @@ fn to_jstring(env: &mut JNIEnv, s: String) -> jstring {
 /// * `detector` / `recognizer` / `swapper` – ONNX model paths
 /// * `enhancer` / `landmark` – optional model paths (pass an empty string to disable)
 /// * `use_mouth_mask` / `use_multi_face` – feature toggles
-/// * `pixel_boost` – 1..=4, i.e. 128 / 256 / 384 / 512px swap resolution
+/// * `pixel_boost` – 1..=8, i.e. 128 / 256 / 384 / 512 / 768 / 1024px swap resolution
 /// * `enhancer_strength` – 0.0..=1.0 blend of the restored face
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
@@ -94,7 +94,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
     let opts = SwapOptions {
         use_mouth_mask: mouth_mask,
         use_multi_face: multi_face,
-        pixel_boost: pixel_boost.clamp(1, 4) as u32,
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
     };
 
@@ -170,4 +170,148 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_faceProgress(
     let done = FACES_DONE.load(Ordering::SeqCst).clamp(0, 0xFFFF);
     let total = FACES_TOTAL.load(Ordering::SeqCst).clamp(0, 0xFFFF);
     (done << 16) | total
+}
+
+/// Detect faces for the manual mapping UI.
+///
+/// Crops are written under `crops_dir` and their paths returned, so the app can
+/// show the faces and let the user pair them up.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_nativeDetectFaces(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_paths: JString,
+    target_path: JString,
+    detector: JString,
+    crops_dir: JString,
+) -> jstring {
+    let source = jstring_to_string(&mut env, &source_paths);
+    let target = jstring_to_string(&mut env, &target_path);
+    let detector = jstring_to_string(&mut env, &detector);
+    let crops_dir = jstring_to_string(&mut env, &crops_dir);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        deep_faceswap_core::swap::detect_faces_for_mapping(&source, &target, &detector, &crops_dir)
+    }));
+
+    let payload = match result {
+        Ok(Ok(faces)) => serde_json::json!({
+            "ok": true,
+            "source": faces.source.iter().map(face_to_json).collect::<Vec<_>>(),
+            "target": faces.target.iter().map(face_to_json).collect::<Vec<_>>(),
+        })
+        .to_string(),
+        Ok(Err(e)) => serde_json::json!({ "ok": false, "error": e.to_string() }).to_string(),
+        Err(_) => serde_json::json!({
+            "ok": false,
+            "error": "native panic during face detection"
+        })
+        .to_string(),
+    };
+
+    to_jstring(&mut env, payload)
+}
+
+fn face_to_json(face: &deep_faceswap_core::swap::MappingFace) -> serde_json::Value {
+    serde_json::json!({
+        "index": face.index,
+        "score": face.score,
+        "bbox": face.bbox,
+        "crop": face.crop_path,
+    })
+}
+
+/// Swap with explicit source->target pairs, e.g. `"0:0,0:1"`.
+///
+/// Indices are positions in detection order (highest score first), matching what
+/// [`Java_com_deepfaceswap_android_NativeBridge_detectFaces`] returned.
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImageMapped(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_paths: JString,
+    target_path: JString,
+    output_path: JString,
+    detector: JString,
+    recognizer: JString,
+    swapper: JString,
+    enhancer: JString,
+    landmark: JString,
+    mappings: JString,
+    use_mouth_mask: jboolean,
+    pixel_boost: jint,
+    enhancer_strength: jfloat,
+) -> jstring {
+    let source = jstring_to_string(&mut env, &source_paths);
+    let target = jstring_to_string(&mut env, &target_path);
+    let output = jstring_to_string(&mut env, &output_path);
+    let detector = jstring_to_string(&mut env, &detector);
+    let recognizer = jstring_to_string(&mut env, &recognizer);
+    let swapper = jstring_to_string(&mut env, &swapper);
+    let enhancer = jstring_to_string(&mut env, &enhancer);
+    let landmark = jstring_to_string(&mut env, &landmark);
+    let mapping_spec = jstring_to_string(&mut env, &mappings);
+
+    let pairs: Vec<(usize, usize)> = mapping_spec
+        .split(',')
+        .filter(|pair| !pair.trim().is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.split(':');
+            let source_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            let target_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            Some((source_idx, target_idx))
+        })
+        .collect();
+
+    let enhancer_opt = if enhancer.is_empty() { None } else { Some(enhancer.as_str()) };
+    let landmark_opt = if landmark.is_empty() { None } else { Some(landmark.as_str()) };
+
+    let opts = SwapOptions {
+        use_mouth_mask: use_mouth_mask != 0,
+        use_multi_face: true,
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST) as u32,
+        enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
+    };
+
+    STAGE.store(SwapStage::LoadingModels as i32, Ordering::SeqCst);
+    FACES_DONE.store(0, Ordering::SeqCst);
+    FACES_TOTAL.store(pairs.len() as i32, Ordering::SeqCst);
+
+    let mut on_stage = |stage: SwapStage, done: usize, total: usize| {
+        STAGE.store(stage as i32, Ordering::SeqCst);
+        FACES_DONE.store(done as i32, Ordering::SeqCst);
+        FACES_TOTAL.store(total as i32, Ordering::SeqCst);
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        deep_faceswap_core::swap::swap_faces_mapped(
+            &source,
+            &target,
+            &output,
+            &detector,
+            &recognizer,
+            &swapper,
+            enhancer_opt,
+            landmark_opt,
+            opts,
+            &pairs,
+            &mut on_stage,
+        )
+    }));
+
+    let payload = match result {
+        Ok(Ok(())) => serde_json::json!({ "ok": true }).to_string(),
+        Ok(Err(e)) => {
+            STAGE.store(-1, Ordering::SeqCst);
+            serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()
+        }
+        Err(_) => {
+            STAGE.store(-1, Ordering::SeqCst);
+            serde_json::json!({ "ok": false, "error": "native panic during face swap" })
+                .to_string()
+        }
+    };
+
+    to_jstring(&mut env, payload)
 }
