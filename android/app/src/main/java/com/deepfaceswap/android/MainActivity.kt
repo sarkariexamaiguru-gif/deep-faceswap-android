@@ -403,7 +403,7 @@ class MainActivity : Activity() {
         }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         actions.forEach { (icon, spec) ->
             val (label, onClick) = spec
-            header.addView(iconButton(icon, label, onClick).apply {
+            header.addView(iconButton(icon, label, onClick = onClick).apply {
                 layoutParams = RoopUi.margin(this@MainActivity, dp(44), dp(44), 6, 0, 0, 0)
             })
         }
@@ -467,7 +467,7 @@ class MainActivity : Activity() {
             })
             addView(RoopUi.meta(this@MainActivity, describe(file)))
         }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(iconButton(R.drawable.ic_close, "Remove", onRemove).apply {
+        row.addView(iconButton(R.drawable.ic_close, "Remove", onClick = onRemove).apply {
             layoutParams = RoopUi.lp(dp(36), dp(36))
         })
         upload.zone.addView(row)
