@@ -88,12 +88,12 @@ bash scripts/build-native.sh
 
 # 2. Build the APK (skips the Rust step since we just ran it)
 cd android
-./gradlew assembleDebug -PskipRust=true
+./gradlew assembleRelease -PskipRust=true
 ```
 
-The APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
+The APK lands at `android/app/build/outputs/apk/release/app-release.apk`.
 
-`./gradlew assembleDebug` on its own will also invoke `cargo-ndk` for you
+`./gradlew assembleRelease` on its own will also invoke `cargo-ndk` for you
 (drop `-PskipRust=true`); pass `-PskipRust=true` when you have already built the
 native library.
 
