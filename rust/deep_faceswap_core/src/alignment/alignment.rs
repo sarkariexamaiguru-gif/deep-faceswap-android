@@ -55,19 +55,31 @@ const LANDMARKS_512: [[f32; 2]; 5] = [
 /// # Returns
 /// AlignedFace containing face data, aligned image, and transformation matrix
 pub fn align_face(img: &Array3<u8>, face: &DetectedFace, target_size: u32) -> Result<AlignedFace> {
-    let target_landmarks = match target_size {
-        112 => &LANDMARKS_112,
-        128 => &LANDMARKS_128,
-        512 => &LANDMARKS_512,
+    // 112 is used for recognition; 128 and any multiple of it are used for
+    // swapping, pixel boost (256 / 384 / 512) and enhancement. Larger sizes
+    // reuse the 128 landmark template, scaled up.
+    let target_landmarks: [[f32; 2]; 5] = match target_size {
+        112 => LANDMARKS_112,
+        128 => LANDMARKS_128,
+        512 => LANDMARKS_512,
+        s if s % 128 == 0 => {
+            let k = (s / 128) as f32;
+            let mut scaled = LANDMARKS_128;
+            for point in scaled.iter_mut() {
+                point[0] *= k;
+                point[1] *= k;
+            }
+            scaled
+        }
         _ => {
             return Err(FaceSwapError::InvalidInput(format!(
-                "Unsupported target size: {}. Use 112, 128, or 512",
+                "Unsupported target size: {}. Use 112, or a multiple of 128",
                 target_size
             )))
         }
     };
 
-    let transform = estimate_affine_transform(&face.landmarks, target_landmarks)?;
+    let transform = estimate_affine_transform(&face.landmarks, &target_landmarks)?;
 
     // warp_affine expects aligned_coords -> original_coords
     // transform is: original_coords -> aligned_coords

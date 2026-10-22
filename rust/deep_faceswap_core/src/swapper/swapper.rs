@@ -258,4 +258,75 @@ impl FaceSwapper {
 
         Ok(swapped)
     }
+
+    /// Swap a larger aligned face using the "pixel boost" technique.
+    ///
+    /// inswapper is a 128px model. To work above that, the aligned face is split
+    /// into `grid * grid` sub-images by taking every `grid`-th pixel (an
+    /// interleaved pixel grid), each sub-image is swapped at 128px, and the
+    /// swapped sub-images are interleaved back into the full-size result.
+    ///
+    /// `grid = 2` yields 256, `3` yields 384, `4` yields 512, at 4 / 9 / 16 model
+    /// passes respectively. This is the standard approach used by desktop tools
+    /// for sharper results on faces larger than 128px.
+    ///
+    /// # Arguments
+    /// * `aligned` - Aligned face as NCHW (1, 3, 128*grid, 128*grid), normalized to [0, 1]
+    /// * `source_embedding` - 512-dimensional L2-normalized embedding from source face
+    /// * `grid` - Number of tiles per axis (2, 3 or 4). Values below 2 fall back to `swap`
+    ///
+    /// # Returns
+    /// Swapped face as NCHW (1, 3, 128*grid, 128*grid), normalized to [0, 1]
+    pub fn swap_boosted(
+        &mut self,
+        aligned: &Array4<f32>,
+        source_embedding: &[f32],
+        grid: usize,
+    ) -> Result<Array4<f32>> {
+        if grid < 2 {
+            return self.swap(aligned, source_embedding);
+        }
+
+        let shape = aligned.shape();
+        let size = SWAP_SIZE * grid;
+        if shape[0] != 1 || shape[1] != 3 || shape[2] != size || shape[3] != size {
+            return Err(FaceSwapError::InvalidInput(format!(
+                "Expected boosted target shape (1, 3, {}, {}), got ({}, {}, {}, {})",
+                size, size, shape[0], shape[1], shape[2], shape[3]
+            )));
+        }
+
+        log_additional!(EVENT_SWAP_FACE, "Swapping face with pixel boost", grid = grid);
+
+        let mut out = Array4::<f32>::zeros((1, 3, size, size));
+
+        for tile_y in 0..grid {
+            for tile_x in 0..grid {
+                // De-interleave this tile out of the aligned face.
+                let mut sub = Array4::<f32>::zeros((1, 3, SWAP_SIZE, SWAP_SIZE));
+                for c in 0..3 {
+                    for y in 0..SWAP_SIZE {
+                        for x in 0..SWAP_SIZE {
+                            sub[[0, c, y, x]] =
+                                aligned[[0, c, y * grid + tile_y, x * grid + tile_x]];
+                        }
+                    }
+                }
+
+                let swapped = self.swap(&sub, source_embedding)?;
+
+                // Interleave the swapped tile back into the full-size result.
+                for c in 0..3 {
+                    for y in 0..SWAP_SIZE {
+                        for x in 0..SWAP_SIZE {
+                            out[[0, c, y * grid + tile_y, x * grid + tile_x]] =
+                                swapped[[0, c, y, x]];
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(out)
+    }
 }

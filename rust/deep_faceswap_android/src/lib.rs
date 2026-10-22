@@ -10,11 +10,11 @@
 //! ```
 
 use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jint, jstring};
+use jni::sys::{jboolean, jfloat, jint, jstring};
 use jni::JNIEnv;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use deep_faceswap_core::swap::SwapStage;
+use deep_faceswap_core::swap::{SwapOptions, SwapStage};
 
 /// Latest progress stage, polled from Kotlin while the swap runs on a worker
 /// thread. `-1` means "no swap in flight".
@@ -47,6 +47,8 @@ fn to_jstring(env: &mut JNIEnv, s: String) -> jstring {
 /// * `detector` / `recognizer` / `swapper` – ONNX model paths
 /// * `enhancer` / `landmark` – optional model paths (pass an empty string to disable)
 /// * `use_mouth_mask` / `use_multi_face` – feature toggles
+/// * `pixel_boost` – 1..=4, i.e. 128 / 256 / 384 / 512px swap resolution
+/// * `enhancer_strength` – 0.0..=1.0 blend of the restored face
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
     mut env: JNIEnv,
@@ -61,6 +63,8 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
     landmark: JString,
     use_mouth_mask: jboolean,
     use_multi_face: jboolean,
+    pixel_boost: jint,
+    enhancer_strength: jfloat,
 ) -> jstring {
     let source = jstring_to_string(&mut env, &source_paths);
     let target = jstring_to_string(&mut env, &target_path);
@@ -85,6 +89,15 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
     let mouth_mask = use_mouth_mask != 0;
     let multi_face = use_multi_face != 0;
 
+    // The app's pipeline settings: how hard to work on resolution and how much
+    // of the restored face to keep.
+    let opts = SwapOptions {
+        use_mouth_mask: mouth_mask,
+        use_multi_face: multi_face,
+        pixel_boost: pixel_boost.clamp(1, 4) as u32,
+        enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
+    };
+
     // Reset progress so a stale value from a previous run can never be shown.
     STAGE.store(SwapStage::LoadingModels as i32, Ordering::SeqCst);
     FACES_DONE.store(0, Ordering::SeqCst);
@@ -106,8 +119,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
             &swapper,
             enhancer_opt,
             landmark_opt,
-            mouth_mask,
-            multi_face,
+            opts,
             &mut on_stage,
         )
     }));

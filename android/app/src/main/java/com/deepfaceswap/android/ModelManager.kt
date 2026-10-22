@@ -19,6 +19,7 @@ import java.util.zip.ZipInputStream
  *     2d106det.onnx           106-point landmarks (mouth mask)
  *   inswapper_128.onnx        face swapper
  *   inswapper_128_emap.bin    emap sidecar (bundled in the APK, copied on launch)
+ *   GFPGANv1.4.onnx           optional face enhancer ("master" restore model)
  * ```
  */
 class ModelManager(private val context: Context) {
@@ -27,7 +28,7 @@ class ModelManager(private val context: Context) {
     val buffaloDir = File(modelsDir, "buffalo_l")
 
     /** Where a model comes from. */
-    enum class Source { BUFFALO_ZIP, INSWAPPER, ASSET }
+    enum class Source { BUFFALO_ZIP, INSWAPPER, ASSET, ENHANCER }
 
     /**
      * One downloadable model.
@@ -58,6 +59,7 @@ class ModelManager(private val context: Context) {
         Model("Face landmarker", "2d106det.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "2d106det.onnx"),
         Model("Face swapper", "inswapper_128.onnx", modelsDir, true, Source.INSWAPPER),
         Model("Emap sidecar", "inswapper_128_emap.bin", modelsDir, true, Source.ASSET),
+        Model("Face enhancer", "GFPGANv1.4.onnx", modelsDir, false, Source.ENHANCER),
     )
 
     // Paths handed to the JNI bridge.
@@ -66,6 +68,11 @@ class ModelManager(private val context: Context) {
     val landmarkPath get() = File(buffaloDir, "2d106det.onnx").absolutePath
     val swapperPath get() = File(modelsDir, "inswapper_128.onnx").absolutePath
     val emapPath get() = File(modelsDir, "inswapper_128_emap.bin").absolutePath
+    val enhancerPath get() = File(modelsDir, "GFPGANv1.4.onnx").absolutePath
+
+    /** True when the optional restore model has been downloaded. */
+    val enhancerInstalled: Boolean
+        get() = File(modelsDir, "GFPGANv1.4.onnx").let { it.isFile && it.length() > 0L }
 
     fun ensureDirs() {
         modelsDir.mkdirs()
@@ -118,6 +125,10 @@ class ModelManager(private val context: Context) {
                     throw IllegalStateException("emap asset missing from the APK")
                 }
             }
+            Source.ENHANCER -> {
+                progress("Downloading ${model.fileName} (${'$'}{humanSize(340_256_686L)}) …")
+                downloadFile(ENHANCER_URL, File(modelsDir, model.fileName), progress)
+            }
         }
     }
 
@@ -153,6 +164,13 @@ class ModelManager(private val context: Context) {
             log.append("emap installed.\n")
         } else {
             log.append("emap asset missing from the APK.\n")
+        }
+
+        val optionalMissing = models().filter { !it.required && !it.installed }
+        if (optionalMissing.isNotEmpty()) {
+            log.append("Optional (download individually): ")
+            log.append(optionalMissing.joinToString(", ") { it.title })
+            log.append("\n")
         }
 
         if (log.isEmpty()) log.append("Everything already present.\n")
@@ -242,6 +260,8 @@ class ModelManager(private val context: Context) {
             "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
         private const val INSWAPPER_URL =
             "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx"
+        private const val ENHANCER_URL =
+            "https://huggingface.co/hacksider/deep-live-cam/resolve/main/GFPGANv1.4.onnx"
 
         private val BUFFALO_ENTRIES = setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx")
 

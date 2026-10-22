@@ -29,6 +29,8 @@ object NativeBridge {
         landmark: String,
         useMouthMask: Boolean,
         useMultiFace: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
     ): String
 
     private external fun coreVersion(): String
@@ -95,6 +97,8 @@ object NativeBridge {
         outputPath: String,
         useMouthMask: Boolean,
         useMultiFace: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
     ): SwapResult {
         val models = ModelManager(context)
         val json = swapImage(
@@ -104,11 +108,13 @@ object NativeBridge {
             models.detectorPath,
             models.recognizerPath,
             models.swapperPath,
-            // GFPGAN enhancement is optional and not bundled by default.
-            "",
+            // The restore model is optional: an empty path disables enhancement.
+            if (models.enhancerInstalled) models.enhancerPath else "",
             if (useMouthMask) models.landmarkPath else "",
             useMouthMask,
             useMultiFace,
+            pixelBoost,
+            enhancerStrength,
         )
         return parse(json)
     }

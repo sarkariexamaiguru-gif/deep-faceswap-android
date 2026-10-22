@@ -26,6 +26,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -77,6 +78,19 @@ class MainActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var stageLabel: TextView
     private var polling = false
+
+    // pipeline state (P2/P3) — what the swap will actually do
+    private var pixelBoost = 2
+    private var enhancerOn = true
+    private var enhancerStrength = 0.75f
+    private var presetName = "Balanced"
+    private var syncing = false
+    private val presetChips = mutableListOf<TextView>()
+    private val boostChips = mutableListOf<TextView>()
+    private lateinit var costLabel: TextView
+    private lateinit var strengthLabel: TextView
+    private lateinit var strengthBar: SeekBar
+    private lateinit var enhancerSwitch: Switch
     private lateinit var resultPreview: ImageView
     private lateinit var logView: TextView
 
@@ -415,8 +429,88 @@ class MainActivity : Activity() {
 
     private fun buildQualityPage(): View {
         val col = column()
-        col.addView(sectionLabel("SWAP OPTIONS"))
 
+        col.addView(sectionLabel("PIPELINE PRESET"))
+        val presetCard = card()
+        presetCard.addView(
+            chipRow(listOf("Fast", "Balanced", "Quality", "Max"), presetChips) { applyPreset(it) }
+        )
+        costLabel = TextView(this).apply {
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 12.5f
+            setPadding(0, dp(12), 0, 0)
+        }
+        presetCard.addView(costLabel)
+        col.addView(presetCard)
+
+        col.addView(sectionLabel("PIXEL BOOST"))
+        val boostCard = card()
+        boostCard.addView(
+            chipRow(listOf("128", "256", "384", "512"), boostChips) { setBoost(it + 1) }
+        )
+        boostCard.addView(TextView(this).apply {
+            text = "The swapper always runs at 128px internally. Above that the face is " +
+                "split into an interleaved grid and swapped once per tile — 4 passes at " +
+                "256, 9 at 384, 16 at 512 — then stitched back together. Sharper on large " +
+                "faces, and proportionally slower."
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 12.5f
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(12), 0, 0)
+        })
+        col.addView(boostCard)
+
+        col.addView(sectionLabel("MASTER MODEL \u00B7 RESTORE"))
+        val enhCard = card()
+        enhancerSwitch = addToggle(
+            enhCard,
+            "Restore faces",
+            "Run an enhancer after the swap to recover detail",
+            enhancerOn,
+        )
+        enhancerSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncing) return@setOnCheckedChangeListener
+            enhancerOn = checked
+            markCustom()
+            syncPipelineUi()
+        }
+        enhCard.addView(divider())
+
+        val strengthRow = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        val strengthHead = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        strengthHead.addView(TextView(this).apply {
+            text = "Strength"
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
+        }, LinearLayout.LayoutParams(0, wc, 1f))
+        strengthLabel = TextView(this).apply {
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 14f
+        }
+        strengthHead.addView(strengthLabel)
+        strengthRow.addView(strengthHead)
+        strengthBar = SeekBar(this).apply {
+            max = 100
+            progress = (enhancerStrength * 100).toInt()
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, value: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    enhancerStrength = value / 100f
+                    markCustom()
+                    syncPipelineUi()
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        }
+        strengthRow.addView(strengthBar)
+        enhCard.addView(strengthRow)
+        col.addView(enhCard)
+
+        col.addView(sectionLabel("SWAP OPTIONS"))
         val options = card()
         mouthMask = addToggle(
             options,
@@ -433,17 +527,93 @@ class MainActivity : Activity() {
         )
         col.addView(options)
 
-        col.addView(sectionLabel("COMING NEXT"))
-        val next = card()
-        next.addView(TextView(this).apply {
-            text = "Pixel boost and the enhancer (master) model arrive in the next phase, " +
-                "together with the pipeline builder for chaining models."
-            setTextColor(getColor(R.color.text_dim))
-            textSize = 13.5f
-            setLineSpacing(dp(4).toFloat(), 1f)
-        })
-        col.addView(next)
+        syncPipelineUi()
         return scroll(col)
+    }
+
+    // ------------------------------------------------------------- pipeline --
+
+    private fun chipRow(
+        labels: List<String>,
+        store: MutableList<TextView>,
+        onSelect: (Int) -> Unit,
+    ): LinearLayout {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        store.clear()
+        labels.forEachIndexed { i, name ->
+            val chip = TextView(this).apply {
+                text = name
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(10), dp(4), dp(10))
+                layoutParams = LinearLayout.LayoutParams(0, wc, 1f).apply {
+                    if (i > 0) marginStart = dp(6)
+                }
+                isClickable = true
+                setOnClickListener { onSelect(i) }
+            }
+            store.add(chip)
+            row.addView(chip)
+        }
+        return row
+    }
+
+    private fun paintChips(chips: List<TextView>, selected: Int) {
+        chips.forEachIndexed { i, chip ->
+            val on = i == selected
+            chip.setBackgroundResource(if (on) R.drawable.bg_pill else R.drawable.bg_card_inner)
+            chip.setTextColor(getColor(if (on) R.color.white else R.color.text_dim))
+        }
+    }
+
+    private fun applyPreset(index: Int) {
+        when (index) {
+            0 -> { presetName = "Fast"; pixelBoost = 1; enhancerOn = false; enhancerStrength = 0.0f }
+            1 -> { presetName = "Balanced"; pixelBoost = 2; enhancerOn = true; enhancerStrength = 0.75f }
+            2 -> { presetName = "Quality"; pixelBoost = 3; enhancerOn = true; enhancerStrength = 0.80f }
+            else -> { presetName = "Max"; pixelBoost = 4; enhancerOn = true; enhancerStrength = 0.90f }
+        }
+        syncPipelineUi()
+    }
+
+    private fun setBoost(boost: Int) {
+        pixelBoost = boost
+        markCustom()
+        syncPipelineUi()
+    }
+
+    private fun markCustom() {
+        presetName = "Custom"
+    }
+
+    /** Push the pipeline state into every control. Guarded so it cannot re-enter. */
+    private fun syncPipelineUi() {
+        syncing = true
+        val presetIndex = listOf("Fast", "Balanced", "Quality", "Max").indexOf(presetName)
+        paintChips(presetChips, presetIndex)
+        paintChips(boostChips, pixelBoost - 1)
+        if (::enhancerSwitch.isInitialized) enhancerSwitch.isChecked = enhancerOn
+        if (::strengthBar.isInitialized) {
+            strengthBar.progress = (enhancerStrength * 100).toInt()
+            strengthBar.isEnabled = enhancerOn
+            strengthBar.alpha = if (enhancerOn) 1f else 0.4f
+        }
+        if (::strengthLabel.isInitialized) {
+            strengthLabel.text = if (enhancerOn) "${(enhancerStrength * 100).toInt()}%" else "off"
+        }
+        syncing = false
+        if (::costLabel.isInitialized) costLabel.text = costLine()
+    }
+
+    /** Relative cost, derived from the number of model passes — not a measured time. */
+    private fun costLine(): String {
+        val passes = pixelBoost * pixelBoost
+        val enhancerFactor = if (enhancerOn) 1.6f else 1.0f
+        val relative = passes * enhancerFactor
+        val plural = if (passes == 1) "pass" else "passes"
+        val restore = if (enhancerOn) " + restore" else ""
+        val factor = String.format(Locale.US, "%.1f", relative)
+        return "$presetName \u00B7 $passes swap $plural$restore \u00B7 ~${factor}\u00D7 the 128px baseline"
     }
 
     private fun buildModelsPage(): View {
@@ -882,6 +1052,9 @@ class MainActivity : Activity() {
             toast("Models missing — see Settings")
             return
         }
+        if (enhancerOn && !models.enhancerInstalled) {
+            log("Restore is on but the enhancer isn't downloaded — swapping without it.")
+        }
 
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
@@ -897,6 +1070,8 @@ class MainActivity : Activity() {
                 output.absolutePath,
                 mouthMask.isChecked,
                 multiFace.isChecked,
+                pixelBoost,
+                if (enhancerOn) enhancerStrength else 1.0f,
             )
             io.post {
                 stopProgressPolling()
@@ -1028,6 +1203,6 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.4.0"
+        const val APP_VERSION = "0.5.0"
     }
 }

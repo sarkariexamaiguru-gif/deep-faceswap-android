@@ -49,6 +49,34 @@ pub enum SwapStage {
 /// Callback signature: `(stage, faces_done, faces_total)`.
 pub type StageCallback<'a> = &'a mut dyn FnMut(SwapStage, usize, usize);
 
+/// Everything that shapes a swap beyond the model paths themselves.
+///
+/// This is the "pipeline" the app builds: how hard to work on resolution
+/// (pixel boost), whether to run a master restore model afterwards and how
+/// strongly to apply it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SwapOptions {
+    /// Preserve the target's mouth expression using the 106-point landmarks.
+    pub use_mouth_mask: bool,
+    /// Map the source face onto every detected target face.
+    pub use_multi_face: bool,
+    /// Pixel boost grid: 1 = 128px, 2 = 256, 3 = 384, 4 = 512. Clamped to 1..=4.
+    pub pixel_boost: u32,
+    /// How much of the restored face to keep: 0.0 untouched, 1.0 full restore.
+    pub enhancer_strength: f32,
+}
+
+impl Default for SwapOptions {
+    fn default() -> Self {
+        Self {
+            use_mouth_mask: false,
+            use_multi_face: false,
+            pixel_boost: 1,
+            enhancer_strength: 1.0,
+        }
+    }
+}
+
 /// Swap a single source face into a single target face
 ///
 /// # Arguments
@@ -66,14 +94,47 @@ pub type StageCallback<'a> = &'a mut dyn FnMut(SwapStage, usize, usize);
 pub fn swap_single_pair(
     target_image: &mut Array3<u8>,
     target_face: &DetectedFace,
-    _source_image: &Array3<u8>,
+    source_image: &Array3<u8>,
     source_embedding: &[f32],
     swapper: &mut FaceSwapper,
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
     use_mouth_mask: bool,
 ) -> Result<f64> {
+    swap_single_pair_opts(
+        target_image,
+        target_face,
+        source_image,
+        source_embedding,
+        swapper,
+        enhancer,
+        landmark_detector,
+        SwapOptions {
+            use_mouth_mask,
+            ..SwapOptions::default()
+        },
+    )
+}
+
+/// Swap a single source face into a single target face, honouring `opts`.
+///
+/// # Arguments
+/// * `opts` - Pixel boost, enhancer strength and the mouth-mask toggle
+///
+/// # Returns
+/// Modified target_image with swapped face and elapsed time in seconds
+pub fn swap_single_pair_opts(
+    target_image: &mut Array3<u8>,
+    target_face: &DetectedFace,
+    _source_image: &Array3<u8>,
+    source_embedding: &[f32],
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    opts: SwapOptions,
+) -> Result<f64> {
     let start_time = Instant::now();
+    let use_mouth_mask = opts.use_mouth_mask;
 
     // Detect 106 landmarks on target face before swap (needed for mouth mask)
     let mouth_mask_data = if use_mouth_mask {
@@ -89,13 +150,28 @@ pub fn swap_single_pair(
         None
     };
 
-    log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
-    let target_aligned = alignment::align_face(target_image, target_face, 128)?;
+    // Pixel boost: inswapper always runs at 128 internally. Aligning larger and
+    // running the model over an interleaved NxN grid of 128px sub-images gives a
+    // sharper result at N^2 passes (2 => 256, 3 => 384, 4 => 512).
+    let grid = opts.pixel_boost.clamp(1, 4) as usize;
+    let swap_size = 128 * grid as u32;
 
-    let swapped_face = swapper.swap(&target_aligned.aligned_image, source_embedding)?;
+    log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
+    let target_aligned = alignment::align_face(target_image, target_face, swap_size)?;
+
+    let swapped_face = if grid <= 1 {
+        swapper.swap(&target_aligned.aligned_image, source_embedding)?
+    } else {
+        swapper.swap_boosted(&target_aligned.aligned_image, source_embedding, grid)?
+    };
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
-    alignment::paste_back_inplace(target_image, &swapped_face, &target_aligned.transform, 128)?;
+    alignment::paste_back_inplace(
+        target_image,
+        &swapped_face,
+        &target_aligned.transform,
+        swap_size,
+    )?;
 
     // Apply mouth mask after swap but before enhancement
     if let Some(ref data) = mouth_mask_data {
@@ -109,14 +185,34 @@ pub fn swap_single_pair(
 
         // Align target face from current image to 512x512 for enhancement
         let target_aligned_512 = alignment::align_face(target_image, target_face, 512)?;
+        let before = target_aligned_512.aligned_image.clone();
 
         // Enhance the 512x512 aligned face
-        let enhanced_512 = enh.enhance(&target_aligned_512.aligned_image)?;
+        let enhanced_512 = enh.enhance(&before)?;
+
+        // Blend restored against un-restored by strength: 0.0 leaves the swap
+        // untouched, 1.0 takes the restoration in full.
+        let strength = opts.enhancer_strength.clamp(0.0, 1.0);
+        let blended = if strength >= 0.999 {
+            enhanced_512
+        } else {
+            let mut mixed = before;
+            for c in 0..3 {
+                for y in 0..512usize {
+                    for x in 0..512usize {
+                        let raw = mixed[[0, c, y, x]];
+                        let restored = enhanced_512[[0, c, y, x]];
+                        mixed[[0, c, y, x]] = raw * (1.0 - strength) + restored * strength;
+                    }
+                }
+            }
+            mixed
+        };
 
         // Paste enhanced face back in-place
         alignment::paste_back_inplace(
             target_image,
-            &enhanced_512,
+            &blended,
             &target_aligned_512.transform,
             512,
         )?;
@@ -154,7 +250,7 @@ pub fn swap_with_mappings(
     swapper: &mut FaceSwapper,
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
-    use_mouth_mask: bool,
+    opts: SwapOptions,
     on_stage: StageCallback,
 ) -> Result<f64> {
     log_main!(
@@ -196,7 +292,7 @@ pub fn swap_with_mappings(
         let source_embedding = &source_embeddings[mapping.source_idx];
         let target_face = &target_faces[mapping.target_idx];
 
-        let _ = swap_single_pair(
+        let _ = swap_single_pair_opts(
             target_image,
             target_face,
             source_img,
@@ -204,7 +300,7 @@ pub fn swap_with_mappings(
             swapper,
             enhancer,
             landmark_detector,
-            use_mouth_mask,
+            opts,
         )?;
 
         on_stage(SwapStage::Swapping, face_index + 1, total_faces);
@@ -241,8 +337,11 @@ pub fn swap_faces(
         swapper_model,
         enhancer_model,
         landmark_model,
-        use_mouth_mask,
-        use_multi_face,
+        SwapOptions {
+            use_mouth_mask,
+            use_multi_face,
+            ..SwapOptions::default()
+        },
         &mut |_, _, _| {},
     )
 }
@@ -274,8 +373,7 @@ pub fn swap_faces_reporting(
     swapper_model: &str,
     enhancer_model: Option<&str>,
     landmark_model: Option<&str>,
-    use_mouth_mask: bool,
-    use_multi_face: bool,
+    opts: SwapOptions,
     on_stage: StageCallback,
 ) -> Result<()> {
     log_main!(
@@ -284,7 +382,7 @@ pub fn swap_faces_reporting(
         source = source_path,
         target = target_path,
         output = output_path,
-        multi_face = use_multi_face
+        multi_face = opts.use_multi_face
     );
 
     on_stage(SwapStage::LoadingModels, 0, 0);
@@ -294,7 +392,7 @@ pub fn swap_faces_reporting(
     let mut enhancer = enhancer_model
         .map(|path| FaceEnhancer::new(path))
         .transpose()?;
-    let mut landmark_detector = if use_mouth_mask {
+    let mut landmark_detector = if opts.use_mouth_mask {
         let path = landmark_model.ok_or_else(|| {
             FaceSwapError::InvalidInput(
                 "Landmark model path required when mouth mask is enabled".to_string(),
@@ -384,7 +482,7 @@ pub fn swap_faces_reporting(
     // Build the mapping explicitly instead of prompting on stdin. Multi-face
     // maps the highest-scoring source face onto every detected target face;
     // otherwise it is a single 1:1 swap of the best faces.
-    let mappings: Vec<crate::types::FaceMapping> = if use_multi_face && target_faces.len() > 1 {
+    let mappings: Vec<crate::types::FaceMapping> = if opts.use_multi_face && target_faces.len() > 1 {
         log_main!(
             "multi_face",
             "Multi-face mode enabled",
@@ -414,7 +512,7 @@ pub fn swap_faces_reporting(
         &mut swapper,
         &mut enhancer,
         &mut landmark_detector,
-        use_mouth_mask,
+        opts,
         on_stage,
     )?;
     log_main!(
