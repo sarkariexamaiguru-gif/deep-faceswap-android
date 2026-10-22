@@ -5,7 +5,7 @@
 //! This library provides:
 //! - Face detection (YOLOv8n from buffalo_l)
 //! - Face recognition (ArcFace w600k_r50 from buffalo_l)
-//! - Face swapping (inswapper_128)
+//! - Face swapping (inswapper_128 and HyperSwap 256)
 //! - Face enhancement (GFPGAN)
 //!
 //! The `video` module and the video swap entry points are gated behind the

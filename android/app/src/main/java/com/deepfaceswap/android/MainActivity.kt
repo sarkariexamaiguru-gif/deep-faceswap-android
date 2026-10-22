@@ -88,6 +88,9 @@ class MainActivity : Activity() {
     private var syncing = false
     private val presetChips = mutableListOf<TextView>()
     private val boostChips = mutableListOf<TextView>()
+    private val swapperChips = mutableListOf<TextView>()
+    private var swapperFile = ModelManager.INSWAPPER_FILE
+    private lateinit var boostRowHost: LinearLayout
     private lateinit var costLabel: TextView
     private lateinit var strengthLabel: TextView
     private lateinit var strengthBar: SeekBar
@@ -251,7 +254,10 @@ class MainActivity : Activity() {
         targetPreview = target.preview
         targetHint = target.hint
         col.addView(target.card)
-        targetCaption = caption("The photo to swap the face ONTO")
+        targetCaption = caption(
+            "The photo to swap the face ONTO \u00B7 JPEG \u00B7 PNG \u00B7 WebP \u00B7 GIF " +
+                "\u00B7 BMP \u00B7 TIFF \u00B7 AVIF"
+        )
         col.addView(targetCaption)
 
         col.addView(caption("Swap options live in Settings \u203A Quality"))
@@ -461,6 +467,22 @@ class MainActivity : Activity() {
     private fun buildQualityPage(): View {
         val col = column()
 
+        col.addView(sectionLabel("SWAPPER MODEL"))
+        val swapperCard = card()
+        swapperCard.addView(
+            chipGrid(listOf("inswapper 128", "HyperSwap 1a", "HyperSwap 1c"), swapperChips, 3) { setSwapper(it) }
+        )
+        swapperCard.addView(TextView(this).apply {
+            text = "inswapper is 128px and the lightest. HyperSwap is 256px — noticeably " +
+                "sharper on large faces and roughly 4x the work per pass. Both are " +
+                "research-licence models; download them in Settings \u203A Models."
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 12.5f
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(12), 0, 0)
+        })
+        col.addView(swapperCard)
+
         col.addView(sectionLabel("PIPELINE PRESET"))
         val presetCard = card()
         presetCard.addView(
@@ -476,20 +498,19 @@ class MainActivity : Activity() {
 
         col.addView(sectionLabel("PIXEL BOOST"))
         val boostCard = card()
-        boostCard.addView(
-            chipGrid(BOOST_LABELS, boostChips, 3) { setBoost(it) }
-        )
+        boostRowHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        boostCard.addView(boostRowHost)
         boostCard.addView(TextView(this).apply {
-            text = "The swapper always runs at 128px internally. Above that the face is " +
-                "split into an interleaved grid and swapped once per tile — 4 passes at " +
-                "256, 9 at 384, 16 at 512 — then stitched back together. Sharper on large " +
-                "faces, and proportionally slower."
+            text = "A swapper always runs at its native size. Above that the face is split " +
+                "into an interleaved grid and swapped once per tile, then stitched back " +
+                "together — sharper on large faces, and slower by the square of the grid."
             setTextColor(getColor(R.color.text_dim))
             textSize = 12.5f
             setLineSpacing(dp(3).toFloat(), 1f)
             setPadding(0, dp(12), 0, 0)
         })
         col.addView(boostCard)
+        rebuildBoostChips()
 
         col.addView(sectionLabel("MASTER MODEL \u00B7 RESTORE"))
         val enhCard = card()
@@ -637,9 +658,49 @@ class MainActivity : Activity() {
     }
 
     private fun setBoost(chipIndex: Int) {
-        pixelBoost = BOOST_GRIDS.getOrElse(chipIndex) { 2 }
+        pixelBoost = boostGrids().getOrElse(chipIndex) { 2 }
         markCustom()
         syncPipelineUi()
+    }
+
+    /** Pixel-boost grids valid for the selected swapper (capped at 1024px). */
+    private fun boostGrids(): List<Int> =
+        if (swapperFile == ModelManager.INSWAPPER_FILE) listOf(1, 2, 3, 4, 6, 8)
+        else listOf(1, 2, 3, 4)
+
+    /** Boost chips are labelled in real pixels, so they change with the model. */
+    private fun boostLabels(): List<String> {
+        val base = if (swapperFile == ModelManager.INSWAPPER_FILE) 128 else 256
+        return boostGrids().map { (it * base).toString() }
+    }
+
+    private fun swapperIndex(): Int = when (swapperFile) {
+        ModelManager.HYPERSWAP_1A -> 1
+        ModelManager.HYPERSWAP_1C -> 2
+        else -> 0
+    }
+
+    private fun setSwapper(index: Int) {
+        swapperFile = when (index) {
+            1 -> ModelManager.HYPERSWAP_1A
+            2 -> ModelManager.HYPERSWAP_1C
+            else -> ModelManager.INSWAPPER_FILE
+        }
+        rebuildBoostChips()
+        markCustom()
+        syncPipelineUi()
+    }
+
+    /** Rebuild the boost chips — their count depends on the swapper's native size. */
+    private fun rebuildBoostChips() {
+        if (!::boostRowHost.isInitialized) return
+        val grids = boostGrids()
+        if (pixelBoost !in grids) {
+            pixelBoost = grids.lastOrNull { it <= pixelBoost } ?: grids.first()
+        }
+        boostRowHost.removeAllViews()
+        boostRowHost.addView(chipGrid(boostLabels(), boostChips, 3) { setBoost(it) })
+        paintChips(boostChips, grids.indexOf(pixelBoost))
     }
 
     private fun setMultiFaceMode(index: Int) {
@@ -657,7 +718,8 @@ class MainActivity : Activity() {
         syncing = true
         val presetIndex = PRESETS.indexOf(presetName)
         paintChips(presetChips, presetIndex)
-        paintChips(boostChips, BOOST_GRIDS.indexOf(pixelBoost))
+        paintChips(boostChips, boostGrids().indexOf(pixelBoost))
+        paintChips(swapperChips, swapperIndex())
         paintChips(modeChips, multiFaceMode)
         if (::mappingCard.isInitialized) {
             mappingCard.visibility = if (multiFaceMode == 2) View.VISIBLE else View.GONE
@@ -675,15 +737,22 @@ class MainActivity : Activity() {
         if (::costLabel.isInitialized) costLabel.text = costLine()
     }
 
-    /** Relative cost, derived from the number of model passes — not a measured time. */
+    /**
+     * Relative cost, derived arithmetically from the model's native size, the
+     * number of tiled passes and whether a restore runs — not a measured time.
+     */
     private fun costLine(): String {
+        val native = if (swapperFile == ModelManager.INSWAPPER_FILE) 128 else 256
         val passes = pixelBoost * pixelBoost
+        val pixelFactor = (native * native).toFloat() / (128f * 128f)
         val enhancerFactor = if (enhancerOn) 1.6f else 1.0f
-        val relative = passes * enhancerFactor
+        val relative = passes * pixelFactor * enhancerFactor
         val plural = if (passes == 1) "pass" else "passes"
         val restore = if (enhancerOn) " + restore" else ""
         val factor = String.format(Locale.US, "%.1f", relative)
-        return "$presetName \u00B7 $passes swap $plural$restore \u00B7 ~${factor}\u00D7 the 128px baseline"
+        val missing = if (!models.isSwapperInstalled(swapperFile)) " \u00B7 not downloaded" else ""
+        return "$presetName \u00B7 ${native}px \u00D7 $pixelBoost \u00B7 $passes $plural$restore" +
+            " \u00B7 ~${factor}\u00D7 the inswapper baseline$missing"
     }
 
     // ------------------------------------------------------ face mapping (P4) --
@@ -1047,6 +1116,16 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    /**
+     * Extension for the output file. Formats the `image` crate can encode keep
+     * their extension; anything else (AVIF, for instance, which we can read but
+     * not write) falls back to PNG so nothing is silently re-encoded to JPEG.
+     */
+    private fun outputExtensionFor(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
+        return if (ext in ENCODABLE_OUTPUT) ext else "png"
+    }
+
     // ------------------------------------------------------------- picking --
 
     private fun pickImages(requestCode: Int, multiple: Boolean) {
@@ -1233,6 +1312,11 @@ class MainActivity : Activity() {
         if (enhancerOn && !models.enhancerInstalled) {
             log("Restore is on but the enhancer isn't downloaded — swapping without it.")
         }
+        if (!models.isSwapperInstalled(swapperFile)) {
+            log("The selected swapper ($swapperFile) isn't downloaded — Settings › Models.")
+            toast("Download the selected swapper first")
+            return
+        }
         if (multiFaceMode == 2 && mappings.isEmpty()) {
             toast("Map at least one source → target face")
             return
@@ -1240,7 +1324,8 @@ class MainActivity : Activity() {
 
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
-        val output = File(outDir, "swapped_$stamp.jpg")
+        // Output follows the input format where we can encode it, else PNG.
+        val output = File(outDir, "swapped_$stamp.${outputExtensionFor(target.name)}")
 
         setBusy(true, "Swapping …")
         startProgressPolling()
@@ -1257,6 +1342,7 @@ class MainActivity : Activity() {
                     target.absolutePath,
                     output.absolutePath,
                     manualPairs,
+                    swapperFile,
                     useMouthMask,
                     pixelBoost,
                     strength,
@@ -1267,6 +1353,7 @@ class MainActivity : Activity() {
                     sources,
                     target.absolutePath,
                     output.absolutePath,
+                    swapperFile,
                     useMouthMask,
                     multiFaceMode == 1,
                     pixelBoost,
@@ -1406,13 +1493,15 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.6.0"
+        const val APP_VERSION = "0.7.0"
 
         /** Preset chip labels; the last one is a state, not a value set. */
         val PRESETS = listOf("Fast", "Balanced", "Quality", "Max", "Custom")
 
-        /** Pixel-boost chip labels and the grid each one maps to. */
-        val BOOST_LABELS = listOf("128", "256", "384", "512", "768", "1024")
-        val BOOST_GRIDS = listOf(1, 2, 3, 4, 6, 8)
+        /**
+         * Formats we can write back out. AVIF and HEIC are readable-but-not-writable
+         * (AVIF) or not supported at all (HEIC), so those fall back to PNG.
+         */
+        val ENCODABLE_OUTPUT = setOf("jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp", "gif")
     }
 }

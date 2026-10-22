@@ -154,11 +154,13 @@ pub fn swap_single_pair_opts(
         None
     };
 
-    // Pixel boost: inswapper always runs at 128 internally. Aligning larger and
-    // running the model over an interleaved NxN grid of 128px sub-images gives a
-    // sharper result at N^2 passes (2 => 256, 3 => 384, 4 => 512).
-    let grid = opts.pixel_boost.clamp(1, MAX_PIXEL_BOOST) as usize;
-    let swap_size = 128 * grid as u32;
+    // Pixel boost: a swapper always runs at its native size — 128 for inswapper,
+    // 256 for HyperSwap. Aligning larger and running the model over an
+    // interleaved NxN grid of native-size sub-images gives a sharper result at
+    // N^2 passes (inswapper: 2 => 256 ... 8 => 1024; HyperSwap: 2 => 512 ... 4 => 1024).
+    let max_grid = swapper.max_grid() as u32;
+    let grid = opts.pixel_boost.clamp(1, max_grid) as usize;
+    let swap_size = (swapper.model_size() * grid) as u32;
 
     log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
     let target_aligned = alignment::align_face(target_image, target_face, swap_size)?;

@@ -17,8 +17,10 @@ import java.util.zip.ZipInputStream
  *     det_10g.onnx            face detector
  *     w600k_r50.onnx          ArcFace recogniser
  *     2d106det.onnx           106-point landmarks (mouth mask)
- *   inswapper_128.onnx        face swapper
+ *   inswapper_128.onnx        face swapper (default)
  *   inswapper_128_emap.bin    emap sidecar (bundled in the APK, copied on launch)
+ *   hyperswap_1a_256.onnx     alternative swapper
+ *   hyperswap_1c_256.onnx     alternative swapper
  *   GFPGANv1.4.onnx           optional face enhancer ("master" restore model)
  * ```
  */
@@ -28,7 +30,16 @@ class ModelManager(private val context: Context) {
     val buffaloDir = File(modelsDir, "buffalo_l")
 
     /** Where a model comes from. */
-    enum class Source { BUFFALO_ZIP, INSWAPPER, ASSET, ENHANCER }
+    enum class Source {
+        /** Entry inside the shared buffalo_l archive. */
+        BUFFALO_ZIP,
+
+        /** Bundled in the APK and copied out on first use. */
+        ASSET,
+
+        /** A direct download URL. */
+        URL,
+    }
 
     /**
      * One downloadable model.
@@ -36,9 +47,12 @@ class ModelManager(private val context: Context) {
      * @property title    human-readable name
      * @property fileName file on disk
      * @property dir      directory the file lives in
-     * @property required whether the engine needs it to run
+     * @property required whether the engine needs it to run at all
      * @property source   how to obtain it
      * @property zipEntry entry name inside the buffalo_l archive
+     * @property url      direct download URL for [Source.URL]
+     * @property approxSize human-readable download size, for display
+     * @property licence  the licence the model is released under
      */
     data class Model(
         val title: String,
@@ -47,6 +61,9 @@ class ModelManager(private val context: Context) {
         val required: Boolean,
         val source: Source,
         val zipEntry: String? = null,
+        val url: String? = null,
+        val approxSize: String = "",
+        val licence: String = "",
     ) {
         val file: File get() = File(dir, fileName)
         val installed: Boolean get() = file.isFile && file.length() > 0L
@@ -54,25 +71,40 @@ class ModelManager(private val context: Context) {
     }
 
     fun models(): List<Model> = listOf(
-        Model("Face detector", "det_10g.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "det_10g.onnx"),
-        Model("Face recogniser", "w600k_r50.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "w600k_r50.onnx"),
-        Model("Face landmarker", "2d106det.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "2d106det.onnx"),
-        Model("Face swapper", "inswapper_128.onnx", modelsDir, true, Source.INSWAPPER),
-        Model("Emap sidecar", "inswapper_128_emap.bin", modelsDir, true, Source.ASSET),
-        Model("Face enhancer", "GFPGANv1.4.onnx", modelsDir, false, Source.ENHANCER),
+        Model("Face detector", "det_10g.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "det_10g.onnx",
+            approxSize = "17 MB", licence = "Non-commercial"),
+        Model("Face recogniser", "w600k_r50.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "w600k_r50.onnx",
+            approxSize = "166 MB", licence = "Non-commercial"),
+        Model("Face landmarker", "2d106det.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "2d106det.onnx",
+            approxSize = "5 MB", licence = "Non-commercial"),
+        Model("Emap sidecar", "inswapper_128_emap.bin", modelsDir, true, Source.ASSET,
+            approxSize = "1 MB", licence = "Non-commercial"),
+        Model("Swapper · inswapper 128", "inswapper_128.onnx", modelsDir, true, Source.URL,
+            url = INSWAPPER_URL, approxSize = "265 MB", licence = "Non-commercial"),
+        Model("Swapper · HyperSwap 1a 256", HYPERSWAP_1A, modelsDir, false, Source.URL,
+            url = HYPERSWAP_1A_URL, approxSize = "384 MB", licence = "ResearchRAIL"),
+        Model("Swapper · HyperSwap 1c 256", HYPERSWAP_1C, modelsDir, false, Source.URL,
+            url = HYPERSWAP_1C_URL, approxSize = "384 MB", licence = "ResearchRAIL"),
+        Model("Enhancer · GFPGAN 1.4", ENHANCER_FILE, modelsDir, false, Source.URL,
+            url = ENHANCER_URL, approxSize = "340 MB", licence = "Apache-2.0"),
     )
 
     // Paths handed to the JNI bridge.
     val detectorPath get() = File(buffaloDir, "det_10g.onnx").absolutePath
     val recognizerPath get() = File(buffaloDir, "w600k_r50.onnx").absolutePath
     val landmarkPath get() = File(buffaloDir, "2d106det.onnx").absolutePath
-    val swapperPath get() = File(modelsDir, "inswapper_128.onnx").absolutePath
     val emapPath get() = File(modelsDir, "inswapper_128_emap.bin").absolutePath
-    val enhancerPath get() = File(modelsDir, "GFPGANv1.4.onnx").absolutePath
+    val enhancerPath get() = File(modelsDir, ENHANCER_FILE).absolutePath
+
+    /** Path to a swapper by file name, e.g. [INSWAPPER_FILE]. */
+    fun swapperPath(fileName: String): String = File(modelsDir, fileName).absolutePath
+
+    /** Whether a swapper has been downloaded. */
+    fun isSwapperInstalled(fileName: String): Boolean =
+        File(modelsDir, fileName).let { it.isFile && it.length() > 0L }
 
     /** True when the optional restore model has been downloaded. */
-    val enhancerInstalled: Boolean
-        get() = File(modelsDir, "GFPGANv1.4.onnx").let { it.isFile && it.length() > 0L }
+    val enhancerInstalled: Boolean get() = isSwapperInstalled(ENHANCER_FILE)
 
     fun ensureDirs() {
         modelsDir.mkdirs()
@@ -87,7 +119,7 @@ class ModelManager(private val context: Context) {
 
     fun totalBytes(): Long = models().sumOf { it.bytes }
 
-    /** `"3 of 5 present, 412.6 MB on disk"` */
+    /** `"4 of 8 present, 412.6 MB on disk"` */
     fun summaryLine(): String {
         val all = models()
         return "${all.count { it.installed }} of ${all.size} present, ${humanSize(totalBytes())} on disk"
@@ -115,19 +147,18 @@ class ModelManager(private val context: Context) {
                 progress("Downloading buffalo_l.zip …")
                 downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, progress)
             }
-            Source.INSWAPPER -> {
-                progress("Downloading inswapper_128.onnx …")
-                downloadFile(INSWAPPER_URL, File(modelsDir, model.fileName), progress)
-            }
             Source.ASSET -> {
                 progress("Installing ${model.fileName} from the APK …")
                 if (!copyEmapFromAssetsIfPresent()) {
                     throw IllegalStateException("emap asset missing from the APK")
                 }
             }
-            Source.ENHANCER -> {
-                progress("Downloading ${model.fileName} (${'$'}{humanSize(340_256_686L)}) …")
-                downloadFile(ENHANCER_URL, File(modelsDir, model.fileName), progress)
+            Source.URL -> {
+                val url = model.url
+                    ?: throw IllegalStateException("no download URL for ${model.fileName}")
+                val size = if (model.approxSize.isNotEmpty()) " (${model.approxSize})" else ""
+                progress("Downloading ${model.fileName}$size …")
+                downloadFile(url, model.file, progress)
             }
         }
     }
@@ -137,8 +168,7 @@ class ModelManager(private val context: Context) {
         ensureDirs()
         val log = StringBuilder()
 
-        val buffaloMissing = models()
-            .filter { it.source == Source.BUFFALO_ZIP && !it.installed }
+        val buffaloMissing = models().filter { it.source == Source.BUFFALO_ZIP && !it.installed }
         if (buffaloMissing.isNotEmpty()) {
             progress("Downloading buffalo_l.zip …")
             try {
@@ -149,16 +179,17 @@ class ModelManager(private val context: Context) {
             }
         }
 
-        val swapper = models().first { it.source == Source.INSWAPPER }
-        if (!swapper.installed) {
-            progress("Downloading inswapper_128.onnx …")
-            try {
-                downloadFile(INSWAPPER_URL, swapper.file, progress)
-                log.append("inswapper_128.onnx installed.\n")
-            } catch (e: Exception) {
-                log.append("inswapper download failed: ${e.message}\n")
+        models()
+            .filter { it.source == Source.URL && it.required && !it.installed }
+            .forEach { model ->
+                progress("Downloading ${model.fileName} (${model.approxSize}) …")
+                try {
+                    downloadFile(model.url!!, model.file, progress)
+                    log.append("${model.fileName} installed.\n")
+                } catch (e: Exception) {
+                    log.append("${model.fileName} download failed: ${e.message}\n")
+                }
             }
-        }
 
         if (copyEmapFromAssetsIfPresent()) {
             log.append("emap installed.\n")
@@ -198,7 +229,10 @@ class ModelManager(private val context: Context) {
         val conn = open(url)
         conn.inputStream.use { input ->
             target.parentFile?.mkdirs()
-            FileOutputStream(target).use { output ->
+            // Write to a temp file first so an interrupted download never leaves
+            // a truncated model that looks installed.
+            val temp = File(target.parentFile, "${target.name}.part")
+            FileOutputStream(temp).use { output ->
                 val buf = ByteArray(1 shl 16)
                 var total = 0L
                 var last = 0L
@@ -207,11 +241,20 @@ class ModelManager(private val context: Context) {
                     if (n < 0) break
                     output.write(buf, 0, n)
                     total += n
-                    if (total - last > (4L shl 20)) {
+                    if (total - last > (8L shl 20)) {
                         progress("  … ${humanSize(total)}")
                         last = total
                     }
                 }
+            }
+            if (temp.length() <= 0L) {
+                temp.delete()
+                throw IllegalStateException("downloaded file is empty")
+            }
+            if (target.exists()) target.delete()
+            if (!temp.renameTo(target)) {
+                temp.copyTo(target, overwrite = true)
+                temp.delete()
             }
         }
         conn.disconnect()
@@ -251,17 +294,26 @@ class ModelManager(private val context: Context) {
     private fun open(url: String): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 30_000
-            readTimeout = 60_000
+            readTimeout = 120_000
             instanceFollowRedirects = true
         }
 
     companion object {
+        const val INSWAPPER_FILE = "inswapper_128.onnx"
+        const val HYPERSWAP_1A = "hyperswap_1a_256.onnx"
+        const val HYPERSWAP_1C = "hyperswap_1c_256.onnx"
+        const val ENHANCER_FILE = "GFPGANv1.4.onnx"
+
         private const val BUFFALO_ZIP_URL =
             "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
         private const val INSWAPPER_URL =
             "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx"
         private const val ENHANCER_URL =
             "https://huggingface.co/hacksider/deep-live-cam/resolve/main/GFPGANv1.4.onnx"
+        private const val HYPERSWAP_1A_URL =
+            "https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1a_256.onnx"
+        private const val HYPERSWAP_1C_URL =
+            "https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1c_256.onnx"
 
         private val BUFFALO_ENTRIES = setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx")
 

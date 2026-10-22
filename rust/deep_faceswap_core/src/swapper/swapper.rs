@@ -1,20 +1,28 @@
-//! Face swapping using inswapper_128
+//! Face swapping using inswapper_128 and HyperSwap 256
 //!
-//! This module implements face swapping using the inswapper_128 model, which takes
-//! an aligned target face and a source face embedding to generate a swapped face
-//! with the target's pose/expression and the source's identity.
+//! Two swapper families are supported. They share the same ONNX session setup
+//! and the same `source` / `target` input contract, but differ in how identity
+//! is supplied and how pixels are scaled:
 //!
-//! # Model details
+//! ## inswapper_128 (InsightFace)
 //! - Model: inswapper_128.onnx
 //! - Input size: 128x128 aligned face images
-//! - Source: 512-dimensional face embedding (from ArcFace)
-//! - Target: Aligned face image in NCHW format
-//! - Output: Swapped face in NCHW format (128x128)
+//! - Source: 512-dimensional ArcFace embedding, projected through an `emap`
+//!   matrix and re-normalized
+//! - Target/output range: [0, 1] (mean 0, std 1)
 //!
-//! # Emap transformation
-//! The model requires an emap (embedding map) matrix (512x512) that transforms
-//! the source embedding into the model's latent space. This matrix must be extracted
-//! from the ONNX model file separately and saved as a binary file.
+//! ## HyperSwap 256 (FaceFusion)
+//! - Model: hyperswap_1a_256.onnx / hyperswap_1c_256.onnx
+//! - Input size: 256x256 aligned face images
+//! - Source: the **L2-normalized** 512-dimensional ArcFace embedding, used
+//!   directly — no converter matrix is involved for this family
+//! - Target range: [-1, 1] (mean 0.5, std 0.5); output is mapped back to [0, 1]
+//!
+//! # Emap transformation (inswapper only)
+//! inswapper requires an emap (embedding map) matrix (512x512) that transforms
+//! the source embedding into the model's latent space. This matrix must be
+//! extracted from the ONNX model file separately and saved as a binary file.
+//! HyperSwap does not use one.
 
 use crate::types::{FaceSwapError, Result};
 use crate::verbose::{get_verbose_level, VerboseLevel, EVENT_LOAD_MODEL, EVENT_SWAP_FACE};
@@ -31,19 +39,50 @@ use std::path::Path;
 #[cfg(feature = "cuda")]
 use ort::execution_providers::CUDAExecutionProvider;
 
-const SWAP_SIZE: usize = 128;
+/// Native aligned-face size for inswapper.
+const INSWAPPER_SIZE: usize = 128;
+/// Native aligned-face size for HyperSwap.
+const HYPERSWAP_SIZE: usize = 256;
+/// Largest aligned face we will ever hand a swapper (matches the 1024 pixel
+/// boost ceiling the desktop tools use).
+pub const MAX_SWAP_SIZE: usize = 1024;
 
-/// Face swapper model using inswapper architecture
+/// Which swapper family a model file belongs to.
 ///
-/// This swapper combines a target face image with a source face embedding to produce
-/// a swapped face that maintains the target's pose/expression while adopting the
-/// source's identity features.
+/// Detected from the file name, which is reliable for the files this app
+/// downloads and keeps the JNI surface unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapperKind {
+    /// InsightFace inswapper_128 — emap-projected ArcFace embedding, 128px.
+    Inswapper,
+    /// FaceFusion HyperSwap — normalised ArcFace embedding, 256px.
+    Hyperswap,
+}
+
+impl SwapperKind {
+    /// Infer the family from a model path.
+    pub fn from_path(path: &str) -> Self {
+        if path.to_ascii_lowercase().contains("hyperswap") {
+            Self::Hyperswap
+        } else {
+            Self::Inswapper
+        }
+    }
+
+    /// Native aligned-face size for this family.
+    pub fn model_size(self) -> usize {
+        match self {
+            Self::Inswapper => INSWAPPER_SIZE,
+            Self::Hyperswap => HYPERSWAP_SIZE,
+        }
+    }
+}
+
+/// Face swapper model
 ///
-/// # Implementation details
-/// - Uses ONNX Runtime for model inference
-/// - Requires 128x128 aligned face images
-/// - Source embedding is transformed via emap matrix before swapping
-/// - Output is normalized and ready for paste-back to original image
+/// Combines a target face image with a source face embedding to produce a
+/// swapped face that keeps the target's pose/expression and adopts the source's
+/// identity.
 ///
 /// # Example
 /// ```ignore
@@ -55,39 +94,44 @@ const SWAP_SIZE: usize = 128;
 pub struct FaceSwapper {
     /// ONNX Runtime session for the face swapping model
     session: Session,
-    /// Emap transformation matrix (512x512) for embedding projection
-    emap: Array2<f32>,
+    /// Which family this model belongs to
+    kind: SwapperKind,
+    /// Emap transformation matrix (512x512); inswapper only
+    emap: Option<Array2<f32>>,
 }
 
 impl FaceSwapper {
-    /// Load face swapper from ONNX model
-    ///
-    /// Loads the inswapper_128 model and its emap transformation matrix.
-    /// The emap file must exist alongside the model with `_emap.bin` suffix.
+    /// Load a face swapper, inferring the family from the file name.
+    pub fn new(model_path: &str) -> Result<Self> {
+        Self::new_with_kind(model_path, SwapperKind::from_path(model_path))
+    }
+
+    /// Load a face swapper of an explicitly chosen family.
     ///
     /// # Arguments
-    /// * `model_path` - Path to inswapper_128.onnx model file
-    ///
-    /// # Returns
-    /// Initialized face swapper ready for inference
+    /// * `model_path` - Path to the swapper ONNX file
+    /// * `kind` - Swapper family; controls input size, embedding prep and scaling
     ///
     /// # Errors
-    /// - `ModelNotFound` if model file or emap file doesn't exist
+    /// - `ModelNotFound` if the model file (or, for inswapper, the emap) is missing
     /// - `Ort` if ONNX Runtime initialization fails
-    /// - `ProcessingError` if emap file has wrong size
-    ///
-    /// # Required files
-    /// - `inswapper_128.onnx` - Main model file
-    /// - `inswapper_128_emap.bin` - Emap matrix (512x512 float32)
-    pub fn new(model_path: &str) -> Result<Self> {
+    pub fn new_with_kind(model_path: &str, kind: SwapperKind) -> Result<Self> {
         if !Path::new(model_path).exists() {
             return Err(FaceSwapError::ModelNotFound(model_path.to_string()));
         }
 
-        log_main!(EVENT_LOAD_MODEL, "Loading face swapper", path = model_path);
+        log_main!(
+            EVENT_LOAD_MODEL,
+            "Loading face swapper",
+            path = model_path,
+            size = kind.model_size()
+        );
 
-        // Load emap from ONNX model file
-        let emap = Self::load_emap(model_path)?;
+        // Only inswapper needs the emap projection matrix.
+        let emap = match kind {
+            SwapperKind::Inswapper => Some(Self::load_emap(model_path)?),
+            SwapperKind::Hyperswap => None,
+        };
 
         let ort_log_level = match get_verbose_level() {
             VerboseLevel::None => LogLevel::Fatal,
@@ -118,10 +162,25 @@ impl FaceSwapper {
             .commit_from_file(model_path)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?;
 
-        Ok(Self { session, emap })
+        Ok(Self { session, kind, emap })
     }
 
-    /// Load emap transformation matrix from binary file
+    /// Which family this swapper belongs to.
+    pub fn kind(&self) -> SwapperKind {
+        self.kind
+    }
+
+    /// Native aligned-face size in pixels (128 or 256).
+    pub fn model_size(&self) -> usize {
+        self.kind.model_size()
+    }
+
+    /// Largest pixel-boost grid this family supports before exceeding 1024px.
+    pub fn max_grid(&self) -> usize {
+        (MAX_SWAP_SIZE / self.model_size()).max(1)
+    }
+
+    /// Load emap transformation matrix from binary file (inswapper only)
     ///
     /// The emap matrix projects face embeddings into the model's latent space.
     /// It must be extracted from the ONNX model file once and saved as binary.
@@ -131,20 +190,6 @@ impl FaceSwapper {
     ///
     /// # Returns
     /// 512x512 transformation matrix as Array2<f32>
-    ///
-    /// # Errors
-    /// - `ModelNotFound` if emap file doesn't exist
-    /// - `ProcessingError` if file size is incorrect or parsing fails
-    ///
-    /// # Emap extraction
-    /// The emap file should be extracted from the ONNX model using Python:
-    /// ```python
-    /// import onnx
-    /// from onnx import numpy_helper
-    /// model = onnx.load('inswapper_128.onnx')
-    /// emap = numpy_helper.to_array(model.graph.initializer[-1])
-    /// emap.astype(np.float32).tofile('inswapper_128_emap.bin')
-    /// ```
     fn load_emap(model_path: &str) -> Result<Array2<f32>> {
         use std::fs::File;
         use std::io::Read;
@@ -181,45 +226,12 @@ impl FaceSwapper {
             .map_err(|e| FaceSwapError::ProcessingError(format!("Cannot create emap array: {}", e)))
     }
 
-    /// Swap face in target image with source embedding
+    /// Turn a source embedding into the exact input this family expects.
     ///
-    /// Takes an aligned target face and source embedding to produce a swapped face.
-    /// The source embedding is transformed via emap matrix before being passed to
-    /// the model along with the target face.
-    ///
-    /// # Arguments
-    /// * `target_face_aligned` - Aligned target face as NCHW array (1, 3, 128, 128), normalized to [0, 1]
-    /// * `source_embedding` - 512-dimensional L2-normalized embedding from source face
-    ///
-    /// # Returns
-    /// Swapped face as NCHW array (1, 3, 128, 128), normalized to [0, 1]
-    ///
-    /// # Errors
-    /// - `InvalidInput` if target face shape is not (1, 3, 128, 128)
-    /// - `InvalidInput` if source embedding length is not 512
-    /// - `Ort` if model inference fails
-    /// - `ProcessingError` if output shape conversion fails
-    ///
-    /// # Process
-    /// 1. Transform source embedding: `latent = embedding @ emap`
-    /// 2. Normalize latent vector: `latent = latent / ||latent||`
-    /// 3. Run model inference with target face and transformed embedding
-    /// 4. Return swapped face in same format as target
-    pub fn swap(
-        &mut self,
-        target_face_aligned: &Array4<f32>,
-        source_embedding: &[f32],
-    ) -> Result<Array4<f32>> {
-        log_additional!(EVENT_SWAP_FACE, "Swapping face");
-
-        let shape = target_face_aligned.shape();
-        if shape[0] != 1 || shape[1] != 3 || shape[2] != SWAP_SIZE || shape[3] != SWAP_SIZE {
-            return Err(FaceSwapError::InvalidInput(format!(
-                "Expected target face shape (1, 3, {}, {}), got ({}, {}, {}, {})",
-                SWAP_SIZE, SWAP_SIZE, shape[0], shape[1], shape[2], shape[3]
-            )));
-        }
-
+    /// * inswapper: `latent = embedding @ emap`, then L2-normalized
+    /// * HyperSwap: the embedding itself, L2-normalized (it is already
+    ///   normalized by the recogniser, but we do not rely on that)
+    fn prepare_source_input(&self, source_embedding: &[f32]) -> Result<Array2<f32>> {
         if source_embedding.len() != 512 {
             return Err(FaceSwapError::InvalidInput(format!(
                 "Expected 512-d source embedding, got {}",
@@ -227,26 +239,89 @@ impl FaceSwapper {
             )));
         }
 
-        // Transform source embedding with emap matrix
-        // latent = embedding @ emap
-        // latent = latent / norm(latent)
         let embedding = Array1::from_vec(source_embedding.to_vec());
         let embedding_2d = embedding.insert_axis(ndarray::Axis(0));
 
-        let transformed = embedding_2d.dot(&self.emap);
+        let transformed = match &self.emap {
+            Some(emap) => embedding_2d.dot(emap),
+            None => embedding_2d,
+        };
+
         let norm: f32 = transformed.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let normalized = transformed / norm;
+        if !norm.is_finite() || norm <= f32::EPSILON {
+            return Err(FaceSwapError::ProcessingError(
+                "Source embedding has zero norm".to_string(),
+            ));
+        }
+
+        Ok(transformed / norm)
+    }
+
+    /// Scale a [0, 1] aligned face into this family's input range.
+    ///
+    /// inswapper expects [0, 1]; HyperSwap expects [-1, 1].
+    fn scale_target(&self, aligned: &Array4<f32>) -> Array4<f32> {
+        match self.kind {
+            SwapperKind::Inswapper => aligned.clone(),
+            SwapperKind::Hyperswap => aligned.mapv(|v| v * 2.0 - 1.0),
+        }
+    }
+
+    /// Map the model's output back into the [0, 1] range the paste-back expects.
+    fn unscale_output(&self, out: Array4<f32>) -> Array4<f32> {
+        match self.kind {
+            SwapperKind::Inswapper => out,
+            SwapperKind::Hyperswap => out.mapv(|v| (v * 0.5 + 0.5).clamp(0.0, 1.0)),
+        }
+    }
+
+    /// Swap face in target image with source embedding
+    ///
+    /// # Arguments
+    /// * `target_face_aligned` - Aligned target face as NCHW, normalized to [0, 1].
+    ///   The side must equal [`Self::model_size`] (128 for inswapper, 256 for HyperSwap).
+    /// * `source_embedding` - 512-dimensional L2-normalized embedding from source face
+    ///
+    /// # Returns
+    /// Swapped face as NCHW, normalized to [0, 1]
+    pub fn swap(
+        &mut self,
+        target_face_aligned: &Array4<f32>,
+        source_embedding: &[f32],
+    ) -> Result<Array4<f32>> {
+        log_additional!(EVENT_SWAP_FACE, "Swapping face");
+
+        let size = self.model_size();
+        let shape = target_face_aligned.shape();
+        if shape[0] != 1 || shape[1] != 3 || shape[2] != size || shape[3] != size {
+            return Err(FaceSwapError::InvalidInput(format!(
+                "Expected target face shape (1, 3, {}, {}), got ({}, {}, {}, {})",
+                size, size, shape[0], shape[1], shape[2], shape[3]
+            )));
+        }
+
+        let source_input = self.prepare_source_input(source_embedding)?;
+        let target_input = self.scale_target(target_face_aligned);
+
+        // Take the model's declared first output rather than assuming a name:
+        // inswapper calls it "output", and other families are free to differ.
+        let output_name = self
+            .session
+            .outputs
+            .first()
+            .map(|output| output.name.clone())
+            .ok_or_else(|| FaceSwapError::Ort("swapper model declares no outputs".to_string()))?;
 
         let swapped = {
             let outputs = self
                 .session
                 .run(inputs![
-                    "target" => TensorRef::from_array_view(target_face_aligned.view())?,
-                    "source" => TensorRef::from_array_view(normalized.view())?
+                    "target" => TensorRef::from_array_view(target_input.view())?,
+                    "source" => TensorRef::from_array_view(source_input.view())?
                 ])
                 .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?;
 
-            let array_d = outputs["output"]
+            let array_d = outputs[output_name.as_str()]
                 .try_extract_array::<f32>()
                 .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
                 .into_owned();
@@ -256,27 +331,25 @@ impl FaceSwapper {
                 .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?
         };
 
-        Ok(swapped)
+        Ok(self.unscale_output(swapped))
     }
 
     /// Swap a larger aligned face using the "pixel boost" technique.
     ///
-    /// inswapper is a 128px model. To work above that, the aligned face is split
-    /// into `grid * grid` sub-images by taking every `grid`-th pixel (an
-    /// interleaved pixel grid), each sub-image is swapped at 128px, and the
-    /// swapped sub-images are interleaved back into the full-size result.
-    ///
-    /// `grid = 2` yields 256, `3` yields 384, `4` yields 512, at 4 / 9 / 16 model
-    /// passes respectively. This is the standard approach used by desktop tools
-    /// for sharper results on faces larger than 128px.
+    /// The swapper runs at its native size (128 or 256). To work above that, the
+    /// aligned face is split into `grid * grid` sub-images by taking every
+    /// `grid`-th pixel (an interleaved pixel grid), each sub-image is swapped at
+    /// native size, and the swapped sub-images are interleaved back into the
+    /// full-size result. This matches the reference implementation used by the
+    /// desktop tools.
     ///
     /// # Arguments
-    /// * `aligned` - Aligned face as NCHW (1, 3, 128*grid, 128*grid), normalized to [0, 1]
+    /// * `aligned` - Aligned face as NCHW (1, 3, size*grid, size*grid), normalized to [0, 1]
     /// * `source_embedding` - 512-dimensional L2-normalized embedding from source face
-    /// * `grid` - Number of tiles per axis (2, 3 or 4). Values below 2 fall back to `swap`
+    /// * `grid` - Number of tiles per axis. Values below 2 fall back to `swap`
     ///
     /// # Returns
-    /// Swapped face as NCHW (1, 3, 128*grid, 128*grid), normalized to [0, 1]
+    /// Swapped face as NCHW (1, 3, size*grid, size*grid), normalized to [0, 1]
     pub fn swap_boosted(
         &mut self,
         aligned: &Array4<f32>,
@@ -287,8 +360,9 @@ impl FaceSwapper {
             return self.swap(aligned, source_embedding);
         }
 
+        let model_size = self.model_size();
         let shape = aligned.shape();
-        let size = SWAP_SIZE * grid;
+        let size = model_size * grid;
         if shape[0] != 1 || shape[1] != 3 || shape[2] != size || shape[3] != size {
             return Err(FaceSwapError::InvalidInput(format!(
                 "Expected boosted target shape (1, 3, {}, {}), got ({}, {}, {}, {})",
@@ -296,17 +370,22 @@ impl FaceSwapper {
             )));
         }
 
-        log_additional!(EVENT_SWAP_FACE, "Swapping face with pixel boost", grid = grid);
+        log_additional!(
+            EVENT_SWAP_FACE,
+            "Swapping face with pixel boost",
+            grid = grid,
+            size = size
+        );
 
         let mut out = Array4::<f32>::zeros((1, 3, size, size));
 
         for tile_y in 0..grid {
             for tile_x in 0..grid {
                 // De-interleave this tile out of the aligned face.
-                let mut sub = Array4::<f32>::zeros((1, 3, SWAP_SIZE, SWAP_SIZE));
+                let mut sub = Array4::<f32>::zeros((1, 3, model_size, model_size));
                 for c in 0..3 {
-                    for y in 0..SWAP_SIZE {
-                        for x in 0..SWAP_SIZE {
+                    for y in 0..model_size {
+                        for x in 0..model_size {
                             sub[[0, c, y, x]] =
                                 aligned[[0, c, y * grid + tile_y, x * grid + tile_x]];
                         }
@@ -317,8 +396,8 @@ impl FaceSwapper {
 
                 // Interleave the swapped tile back into the full-size result.
                 for c in 0..3 {
-                    for y in 0..SWAP_SIZE {
-                        for x in 0..SWAP_SIZE {
+                    for y in 0..model_size {
+                        for x in 0..model_size {
                             out[[0, c, y * grid + tile_y, x * grid + tile_x]] =
                                 swapped[[0, c, y, x]];
                         }
