@@ -55,29 +55,88 @@ const LANDMARKS_512: [[f32; 2]; 5] = [
 /// # Returns
 /// AlignedFace containing face data, aligned image, and transformation matrix
 pub fn align_face(img: &Array3<u8>, face: &DetectedFace, target_size: u32) -> Result<AlignedFace> {
-    // 112 is used for recognition; 128 and any multiple of it are used for
-    // swapping, pixel boost (256 / 384 / 512) and enhancement. Larger sizes
-    // reuse the 128 landmark template, scaled up.
-    let target_landmarks: [[f32; 2]; 5] = match target_size {
-        112 => LANDMARKS_112,
-        128 => LANDMARKS_128,
-        512 => LANDMARKS_512,
-        s if s % 128 == 0 => {
-            let k = (s / 128) as f32;
-            let mut scaled = LANDMARKS_128;
-            for point in scaled.iter_mut() {
-                point[0] *= k;
-                point[1] *= k;
-            }
-            scaled
-        }
-        _ => {
-            return Err(FaceSwapError::InvalidInput(format!(
-                "Unsupported target size: {}. Use 112, or a multiple of 128",
-                target_size
-            )))
-        }
+    // 112 is the recognition crop; everything else uses the ArcFace 128 layout,
+    // scaled to the requested size (swap, pixel boost, enhancement).
+    let template = if target_size == 112 {
+        FaceTemplate::Arcface112
+    } else {
+        FaceTemplate::Arcface128
     };
+    align_face_with_template(img, face, target_size, template)
+}
+
+/// Canonical 5-point warp templates.
+///
+/// Positions are normalized (0..1) and multiplied by the crop size, exactly as
+/// the reference implementations define them. Different swapper families were
+/// trained on different framings, so the template matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceTemplate {
+    /// ArcFace 112 layout (v2) — recognition.
+    Arcface112,
+    /// ArcFace 128 layout — inswapper and HyperSwap.
+    Arcface128,
+    /// ArcFace 112 layout (v1) — the Ghost swapper.
+    Arcface112V1,
+    /// FFHQ 512 layout — UniFace.
+    Ffhq512,
+}
+
+impl FaceTemplate {
+    /// Normalized landmark positions; multiply by the crop size for pixels.
+    pub fn unit_landmarks(self) -> [[f32; 2]; 5] {
+        match self {
+            Self::Arcface112 => [
+                [0.34191607, 0.46157411],
+                [0.65653393, 0.45983393],
+                [0.50022500, 0.64050536],
+                [0.37097589, 0.82469196],
+                [0.63151696, 0.82325089],
+            ],
+            Self::Arcface128 => [
+                [0.36167656, 0.40387734],
+                [0.63696719, 0.40235469],
+                [0.50019687, 0.56044219],
+                [0.38710391, 0.72160547],
+                [0.61507734, 0.72034453],
+            ],
+            Self::Arcface112V1 => [
+                [0.35473214, 0.45658929],
+                [0.64526786, 0.45658929],
+                [0.50000000, 0.61154464],
+                [0.37913393, 0.77687500],
+                [0.62086607, 0.77687500],
+            ],
+            Self::Ffhq512 => [
+                [0.37691676, 0.46864664],
+                [0.62285697, 0.46912813],
+                [0.50123859, 0.61331904],
+                [0.39308822, 0.72541100],
+                [0.61150205, 0.72490465],
+            ],
+        }
+    }
+}
+
+/// Align a face using an explicit warp template.
+///
+/// # Arguments
+/// * `img` - Source image as Array3<u8> (H, W, 3)
+/// * `face` - Detected face with landmarks
+/// * `target_size` - Side of the square crop, in pixels
+/// * `template` - Which canonical framing to warp to
+pub fn align_face_with_template(
+    img: &Array3<u8>,
+    face: &DetectedFace,
+    target_size: u32,
+    template: FaceTemplate,
+) -> Result<AlignedFace> {
+    let unit = template.unit_landmarks();
+    let scale = target_size as f32;
+    let mut target_landmarks = [[0.0f32; 2]; 5];
+    for (i, point) in unit.iter().enumerate() {
+        target_landmarks[i] = [point[0] * scale, point[1] * scale];
+    }
 
     let transform = estimate_affine_transform(&face.landmarks, &target_landmarks)?;
 

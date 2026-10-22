@@ -85,6 +85,12 @@ class ModelManager(private val context: Context) {
             url = HYPERSWAP_1A_URL, approxSize = "384 MB", licence = "ResearchRAIL"),
         Model("Swapper · HyperSwap 1c 256", HYPERSWAP_1C, modelsDir, false, Source.URL,
             url = HYPERSWAP_1C_URL, approxSize = "384 MB", licence = "ResearchRAIL"),
+        Model("Swapper · Ghost 2 256", GHOST_2, modelsDir, false, Source.URL,
+            url = GHOST_2_URL, approxSize = "705 MB", licence = "Apache-2.0"),
+        Model("Converter · Ghost", GHOST_CONVERTER, modelsDir, false, Source.URL,
+            url = GHOST_CONVERTER_URL, approxSize = "20 MB", licence = "Apache-2.0"),
+        Model("Swapper · UniFace 256", UNIFACE, modelsDir, false, Source.URL,
+            url = UNIFACE_URL, approxSize = "388 MB", licence = "Unknown - check before use"),
         Model("Enhancer · GFPGAN 1.4", ENHANCER_FILE, modelsDir, false, Source.URL,
             url = ENHANCER_URL, approxSize = "340 MB", licence = "Apache-2.0"),
     )
@@ -302,6 +308,9 @@ class ModelManager(private val context: Context) {
         const val INSWAPPER_FILE = "inswapper_128.onnx"
         const val HYPERSWAP_1A = "hyperswap_1a_256.onnx"
         const val HYPERSWAP_1C = "hyperswap_1c_256.onnx"
+        const val GHOST_2 = "ghost_2_256.onnx"
+        const val GHOST_CONVERTER = "arcface_converter_ghost.onnx"
+        const val UNIFACE = "uniface_256.onnx"
         const val ENHANCER_FILE = "GFPGANv1.4.onnx"
 
         private const val BUFFALO_ZIP_URL =
@@ -314,6 +323,12 @@ class ModelManager(private val context: Context) {
             "https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1a_256.onnx"
         private const val HYPERSWAP_1C_URL =
             "https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1c_256.onnx"
+        private const val GHOST_2_URL =
+            "https://huggingface.co/facefusion/models-3.0.0/resolve/main/ghost_2_256.onnx"
+        private const val GHOST_CONVERTER_URL =
+            "https://huggingface.co/facefusion/models-3.0.0/resolve/main/arcface_converter_ghost.onnx"
+        private const val UNIFACE_URL =
+            "https://huggingface.co/facefusion/models-3.0.0/resolve/main/uniface_256.onnx"
 
         private val BUFFALO_ENTRIES = setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx")
 

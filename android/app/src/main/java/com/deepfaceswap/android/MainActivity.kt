@@ -470,12 +470,17 @@ class MainActivity : Activity() {
         col.addView(sectionLabel("SWAPPER MODEL"))
         val swapperCard = card()
         swapperCard.addView(
-            chipGrid(listOf("inswapper 128", "HyperSwap 1a", "HyperSwap 1c"), swapperChips, 3) { setSwapper(it) }
+            chipGrid(
+                listOf("inswapper 128", "HyperSwap 1a", "HyperSwap 1c", "Ghost 2", "UniFace"),
+                swapperChips,
+                3,
+            ) { setSwapper(it) }
         )
         swapperCard.addView(TextView(this).apply {
-            text = "inswapper is 128px and the lightest. HyperSwap is 256px — noticeably " +
-                "sharper on large faces and roughly 4x the work per pass. Both are " +
-                "research-licence models; download them in Settings \u203A Models."
+            text = "inswapper is 128px and the lightest. The others are 256px — sharper on " +
+                "large faces at roughly 4x the work per pass. Ghost needs its converter " +
+                "downloaded too; UniFace needs no converter but is licensed 'Unknown'. " +
+                "Get them in Settings \u203A Models."
             setTextColor(getColor(R.color.text_dim))
             textSize = 12.5f
             setLineSpacing(dp(3).toFloat(), 1f)
@@ -674,18 +679,18 @@ class MainActivity : Activity() {
         return boostGrids().map { (it * base).toString() }
     }
 
-    private fun swapperIndex(): Int = when (swapperFile) {
-        ModelManager.HYPERSWAP_1A -> 1
-        ModelManager.HYPERSWAP_1C -> 2
-        else -> 0
-    }
+    private val swapperFiles = listOf(
+        ModelManager.INSWAPPER_FILE,
+        ModelManager.HYPERSWAP_1A,
+        ModelManager.HYPERSWAP_1C,
+        ModelManager.GHOST_2,
+        ModelManager.UNIFACE,
+    )
+
+    private fun swapperIndex(): Int = swapperFiles.indexOf(swapperFile).coerceAtLeast(0)
 
     private fun setSwapper(index: Int) {
-        swapperFile = when (index) {
-            1 -> ModelManager.HYPERSWAP_1A
-            2 -> ModelManager.HYPERSWAP_1C
-            else -> ModelManager.INSWAPPER_FILE
-        }
+        swapperFile = swapperFiles.getOrElse(index) { ModelManager.INSWAPPER_FILE }
         rebuildBoostChips()
         markCustom()
         syncPipelineUi()
@@ -1317,6 +1322,13 @@ class MainActivity : Activity() {
             toast("Download the selected swapper first")
             return
         }
+        if (swapperFile == ModelManager.GHOST_2 &&
+            !models.isSwapperInstalled(ModelManager.GHOST_CONVERTER)
+        ) {
+            log("Ghost needs its embedding converter — Settings › Models.")
+            toast("Download the Ghost converter too")
+            return
+        }
         if (multiFaceMode == 2 && mappings.isEmpty()) {
             toast("Map at least one source → target face")
             return
@@ -1493,7 +1505,7 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.7.0"
+        const val APP_VERSION = "0.8.0"
 
         /** Preset chip labels; the last one is a state, not a value set. */
         val PRESETS = listOf("Fast", "Balanced", "Quality", "Max", "Custom")

@@ -109,6 +109,7 @@ pub fn swap_single_pair(
         target_image,
         target_face,
         source_image,
+        None,
         source_embedding,
         swapper,
         enhancer,
@@ -130,7 +131,8 @@ pub fn swap_single_pair(
 pub fn swap_single_pair_opts(
     target_image: &mut Array3<u8>,
     target_face: &DetectedFace,
-    _source_image: &Array3<u8>,
+    source_image: &Array3<u8>,
+    source_face: Option<&DetectedFace>,
     source_embedding: &[f32],
     swapper: &mut FaceSwapper,
     enhancer: &mut Option<FaceEnhancer>,
@@ -162,13 +164,44 @@ pub fn swap_single_pair_opts(
     let grid = opts.pixel_boost.clamp(1, max_grid) as usize;
     let swap_size = (swapper.model_size() * grid) as u32;
 
+    // Families differ in the framing they were trained on, so the warp template
+    // comes from the swapper rather than being fixed.
+    let template = swapper.kind().target_template();
+
+    // UniFace is fed an aligned source image instead of an embedding.
+    let source_frame = if swapper.kind().needs_source_frame() {
+        let face = source_face.ok_or_else(|| {
+            FaceSwapError::InvalidInput(
+                "This swapper needs the source face, which was not supplied".to_string(),
+            )
+        })?;
+        let aligned = alignment::align_face_with_template(
+            source_image,
+            face,
+            swapper.model_size() as u32,
+            template,
+        )?;
+        Some(aligned.aligned_image)
+    } else {
+        None
+    };
+
     log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
-    let target_aligned = alignment::align_face(target_image, target_face, swap_size)?;
+    let target_aligned =
+        alignment::align_face_with_template(target_image, target_face, swap_size, template)?;
 
     let swapped_face = if grid <= 1 {
-        swapper.swap(&target_aligned.aligned_image, source_embedding)?
+        match source_frame.as_ref() {
+            Some(frame) => swapper.swap_with_source_frame(&target_aligned.aligned_image, frame)?,
+            None => swapper.swap(&target_aligned.aligned_image, source_embedding)?,
+        }
     } else {
-        swapper.swap_boosted(&target_aligned.aligned_image, source_embedding, grid)?
+        swapper.swap_boosted_full(
+            &target_aligned.aligned_image,
+            source_embedding,
+            source_frame.as_ref(),
+            grid,
+        )?
     };
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
@@ -302,6 +335,7 @@ pub fn swap_with_mappings(
             target_image,
             target_face,
             source_img,
+            Some(&source_info.face),
             source_embedding,
             swapper,
             enhancer,
