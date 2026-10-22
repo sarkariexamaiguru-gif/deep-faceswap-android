@@ -1372,3 +1372,194 @@ fn to_mapping_faces(crops: Vec<crate::types::FaceCropInfo>) -> Vec<MappingFace> 
         })
         .collect()
 }
+
+/// Swap faces across every frame of an animated GIF or WebP.
+///
+/// Source faces are detected once and reused for every frame; the target faces
+/// are re-detected per frame, so a moving face keeps its swap. Output is always
+/// written as an animated GIF, because the image crate can decode animated WebP
+/// but cannot write it.
+///
+/// # Arguments
+/// * `mappings` - explicit `(source, target)` pairs, or empty to map automatically
+/// * `on_stage` - receives `(Swapping, frame_index, frame_count)`, giving a real
+///   percentage for animated input
+///
+/// # Returns
+/// The number of frames written
+#[allow(clippy::too_many_arguments)]
+pub fn swap_animation(
+    source_path: &str,
+    target_path: &str,
+    output_path: &str,
+    detector_model: &str,
+    recognizer_model: &str,
+    swapper_model: &str,
+    enhancer_model: Option<&str>,
+    landmark_model: Option<&str>,
+    opts: SwapOptions,
+    mappings: &[(usize, usize)],
+    on_stage: StageCallback,
+) -> Result<usize> {
+    use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
+    use image::codecs::webp::WebPDecoder;
+    use image::{AnimationDecoder, Frame};
+
+    on_stage(SwapStage::LoadingModels, 0, 0);
+    let mut detector = FaceDetector::new(detector_model)?;
+    let mut recognizer = FaceRecognizer::new(recognizer_model)?;
+    let mut swapper = FaceSwapper::new(swapper_model)?;
+    let mut enhancer = enhancer_model
+        .map(|path| FaceEnhancer::new(path))
+        .transpose()?;
+    let mut landmark_detector = if opts.use_mouth_mask {
+        let path = landmark_model.ok_or_else(|| {
+            FaceSwapError::InvalidInput(
+                "Landmark model path required when mouth mask is enabled".to_string(),
+            )
+        })?;
+        Some(LandmarkDetector::new(path)?)
+    } else {
+        None
+    };
+
+    // ---- decode every frame up front so we know the real total
+    let ext = std::path::Path::new(target_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let file = std::fs::File::open(target_path)?;
+    let reader = std::io::BufReader::new(file);
+    let frames: Vec<Frame> = if ext == "webp" {
+        WebPDecoder::new(reader)
+            .map_err(|e| FaceSwapError::ProcessingError(format!("cannot read webp: {}", e)))?
+            .into_frames()
+            .collect_frames()
+            .map_err(|e| FaceSwapError::ProcessingError(format!("cannot decode frames: {}", e)))?
+    } else {
+        GifDecoder::new(reader)
+            .map_err(|e| FaceSwapError::ProcessingError(format!("cannot read gif: {}", e)))?
+            .into_frames()
+            .collect_frames()
+            .map_err(|e| FaceSwapError::ProcessingError(format!("cannot decode frames: {}", e)))?
+    };
+
+    if frames.is_empty() {
+        return Err(FaceSwapError::InvalidInput(
+            "the animation contains no frames".to_string(),
+        ));
+    }
+    let total = frames.len();
+
+    // ---- source faces are detected once and reused for every frame
+    on_stage(SwapStage::LoadingSource, 0, total);
+    let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+    let mut source_images: Vec<Array3<u8>> = Vec::new();
+    let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
+
+    for (img_idx, path) in source_paths.iter().enumerate() {
+        let img = img_io::load_image(path)?;
+        let rgb_img = img_io::to_rgb8(&img);
+        let array = rgb::rgb_to_array3(&rgb_img);
+        let faces = detector.detect(&array, 0.5, 0.4)?;
+
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+
+        for face in faces {
+            all_source_faces.push(SourceFaceInfo {
+                face,
+                source_image_index: img_idx,
+                source_filename: filename.to_string(),
+            });
+        }
+        source_images.push(array);
+    }
+
+    if all_source_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+
+    // ---- swap every frame
+    let mut out_frames: Vec<Frame> = Vec::with_capacity(total);
+    for (index, frame) in frames.into_iter().enumerate() {
+        on_stage(SwapStage::Swapping, index, total);
+
+        let delay = frame.delay();
+        let rgba = frame.into_buffer();
+        let rgb_frame = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
+        let mut array = rgb::rgb_to_array3(&rgb_frame);
+
+        let target_faces = detector.detect(&array, 0.5, 0.4)?;
+        if !target_faces.is_empty() {
+            let pairs: Vec<crate::types::FaceMapping> = if mappings.is_empty() {
+                if opts.use_multi_face && target_faces.len() > 1 {
+                    (0..target_faces.len())
+                        .map(|target_idx| crate::types::FaceMapping {
+                            source_idx: 0,
+                            target_idx,
+                        })
+                        .collect()
+                } else {
+                    vec![crate::types::FaceMapping {
+                        source_idx: 0,
+                        target_idx: 0,
+                    }]
+                }
+            } else {
+                mappings
+                    .iter()
+                    .filter(|(s, t)| *s < all_source_faces.len() && *t < target_faces.len())
+                    .map(|(s, t)| crate::types::FaceMapping {
+                        source_idx: *s,
+                        target_idx: *t,
+                    })
+                    .collect()
+            };
+
+            if !pairs.is_empty() {
+                // Frame-level progress is reported above, so the per-face callback
+                // here is deliberately a no-op.
+                let _ = swap_with_mappings(
+                    &all_source_faces,
+                    &target_faces,
+                    &source_images,
+                    &mut array,
+                    &pairs,
+                    &mut recognizer,
+                    &mut swapper,
+                    &mut enhancer,
+                    &mut landmark_detector,
+                    opts,
+                    &mut |_, _, _| {},
+                )?;
+            }
+        }
+
+        let out_rgb = rgb::array3_to_rgb(&array);
+        let out_rgba = image::DynamicImage::ImageRgb8(out_rgb).to_rgba8();
+        out_frames.push(Frame::from_parts(out_rgba, 0, 0, delay));
+    }
+
+    // ---- encode. Animated WebP cannot be written by the image crate, so the
+    // result is always a GIF; the caller is told this in the UI.
+    on_stage(SwapStage::Saving, total, total);
+    let out_file = std::fs::File::create(output_path)?;
+    let writer = std::io::BufWriter::new(out_file);
+    let mut encoder = GifEncoder::new(writer);
+    encoder
+        .set_repeat(Repeat::Infinite)
+        .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?;
+    for frame in out_frames {
+        encoder
+            .encode_frame(frame)
+            .map_err(|e| FaceSwapError::ProcessingError(format!("cannot encode gif: {}", e)))?;
+    }
+
+    log_main!(EVENT_COMPLETE, "Animation swap completed", frames = total);
+    on_stage(SwapStage::Done, total, total);
+    Ok(total)
+}

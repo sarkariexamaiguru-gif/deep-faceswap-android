@@ -315,3 +315,98 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImageMappe
 
     to_jstring(&mut env, payload)
 }
+
+/// Swap faces across every frame of an animated GIF or WebP.
+///
+/// `mappings` is the same `"s:t,s:t"` spec as `swapImageMapped`; pass an empty
+/// string to map automatically. The result is always written as a GIF.
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapAnimation(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_paths: JString,
+    target_path: JString,
+    output_path: JString,
+    detector: JString,
+    recognizer: JString,
+    swapper: JString,
+    enhancer: JString,
+    landmark: JString,
+    mappings: JString,
+    use_mouth_mask: jboolean,
+    pixel_boost: jint,
+    enhancer_strength: jfloat,
+) -> jstring {
+    let source = jstring_to_string(&mut env, &source_paths);
+    let target = jstring_to_string(&mut env, &target_path);
+    let output = jstring_to_string(&mut env, &output_path);
+    let detector = jstring_to_string(&mut env, &detector);
+    let recognizer = jstring_to_string(&mut env, &recognizer);
+    let swapper = jstring_to_string(&mut env, &swapper);
+    let enhancer = jstring_to_string(&mut env, &enhancer);
+    let landmark = jstring_to_string(&mut env, &landmark);
+    let mapping_spec = jstring_to_string(&mut env, &mappings);
+
+    let pairs: Vec<(usize, usize)> = mapping_spec
+        .split(',')
+        .filter(|pair| !pair.trim().is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.split(':');
+            let source_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            let target_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            Some((source_idx, target_idx))
+        })
+        .collect();
+
+    let enhancer_opt = if enhancer.is_empty() { None } else { Some(enhancer.as_str()) };
+    let landmark_opt = if landmark.is_empty() { None } else { Some(landmark.as_str()) };
+
+    let opts = SwapOptions {
+        use_mouth_mask: use_mouth_mask != 0,
+        use_multi_face: pairs.is_empty(),
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
+        enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
+    };
+
+    STAGE.store(SwapStage::LoadingModels as i32, Ordering::SeqCst);
+    FACES_DONE.store(0, Ordering::SeqCst);
+    FACES_TOTAL.store(0, Ordering::SeqCst);
+
+    let mut on_stage = |stage: SwapStage, done: usize, total: usize| {
+        STAGE.store(stage as i32, Ordering::SeqCst);
+        FACES_DONE.store(done as i32, Ordering::SeqCst);
+        FACES_TOTAL.store(total as i32, Ordering::SeqCst);
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        deep_faceswap_core::swap::swap_animation(
+            &source,
+            &target,
+            &output,
+            &detector,
+            &recognizer,
+            &swapper,
+            enhancer_opt,
+            landmark_opt,
+            opts,
+            &pairs,
+            &mut on_stage,
+        )
+    }));
+
+    let payload = match result {
+        Ok(Ok(frames)) => serde_json::json!({ "ok": true, "frames": frames }).to_string(),
+        Ok(Err(e)) => {
+            STAGE.store(-1, Ordering::SeqCst);
+            serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()
+        }
+        Err(_) => {
+            STAGE.store(-1, Ordering::SeqCst);
+            serde_json::json!({ "ok": false, "error": "native panic during animation swap" })
+                .to_string()
+        }
+    };
+
+    to_jstring(&mut env, payload)
+}

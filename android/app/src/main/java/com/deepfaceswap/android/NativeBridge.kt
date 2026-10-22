@@ -43,6 +43,21 @@ object NativeBridge {
         cropsDir: String,
     ): String
 
+    private external fun swapAnimation(
+        sourcePaths: String,
+        targetPath: String,
+        outputPath: String,
+        detector: String,
+        recognizer: String,
+        swapper: String,
+        enhancer: String,
+        landmark: String,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): String
+
     private external fun swapImageMapped(
         sourcePaths: String,
         targetPath: String,
@@ -113,7 +128,7 @@ object NativeBridge {
      * @property ok whether the swap succeeded
      * @property error human-readable error message when [ok] is false
      */
-    data class SwapResult(val ok: Boolean, val error: String?)
+    data class SwapResult(val ok: Boolean, val error: String?, val frames: Int = 0)
 
     /**
      * Swap the face(s) in [sourcePaths] onto the image at [targetPath], writing
@@ -154,6 +169,7 @@ object NativeBridge {
         SwapResult(
             ok = obj.optBoolean("ok", false),
             error = if (obj.has("error")) obj.optString("error") else null,
+            frames = obj.optInt("frames", 0),
         )
     } catch (e: Exception) {
         SwapResult(ok = false, error = "Malformed native response: $json")
@@ -231,3 +247,39 @@ object NativeBridge {
         return parse(json)
     }
 }
+
+    /**
+     * Swap faces across every frame of an animated GIF or WebP.
+     *
+     * [mappings] may be empty, in which case faces are mapped automatically.
+     * The result is always written as a GIF — animated WebP cannot be encoded.
+     */
+    fun swapAnimation(
+        context: Context,
+        sourcePaths: List<String>,
+        targetPath: String,
+        outputPath: String,
+        mappings: List<Pair<Int, Int>>,
+        swapperFile: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): SwapResult {
+        val models = ModelManager(context)
+        val spec = mappings.joinToString(",") { "${it.first}:${it.second}" }
+        val json = swapAnimation(
+            sourcePaths.joinToString(","),
+            targetPath,
+            outputPath,
+            models.detectorPath,
+            models.recognizerPath,
+            models.swapperPath(swapperFile),
+            if (models.enhancerInstalled) models.enhancerPath else "",
+            if (useMouthMask) models.landmarkPath else "",
+            spec,
+            useMouthMask,
+            pixelBoost,
+            enhancerStrength,
+        )
+        return parse(json)
+    }

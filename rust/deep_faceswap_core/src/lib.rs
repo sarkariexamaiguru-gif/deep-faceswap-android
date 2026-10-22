@@ -31,7 +31,7 @@ pub mod video;
 pub mod verbose;
 
 pub use swap::{
-    detect_faces_for_mapping, swap_faces, swap_faces_mapped, swap_faces_reporting,
+    detect_faces_for_mapping, swap_animation, swap_faces, swap_faces_mapped, swap_faces_reporting,
     swap_single_pair, swap_single_pair_opts, swap_with_mappings, MappingFace, MappingFaces,
     SwapOptions, SwapStage, MAX_PIXEL_BOOST,
 };

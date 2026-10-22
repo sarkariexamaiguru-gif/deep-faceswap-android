@@ -256,7 +256,8 @@ class MainActivity : Activity() {
         col.addView(target.card)
         targetCaption = caption(
             "The photo to swap the face ONTO \u00B7 JPEG \u00B7 PNG \u00B7 WebP \u00B7 GIF " +
-                "\u00B7 BMP \u00B7 TIFF \u00B7 AVIF"
+                "\u00B7 BMP \u00B7 TIFF \u00B7 AVIF\nAnimated GIF/WebP swaps frame by frame " +
+                "and is saved as GIF"
         )
         col.addView(targetCaption)
 
@@ -1126,6 +1127,12 @@ class MainActivity : Activity() {
      * their extension; anything else (AVIF, for instance, which we can read but
      * not write) falls back to PNG so nothing is silently re-encoded to JPEG.
      */
+    /** Animated GIF / WebP inputs take the frame-by-frame path. */
+    private fun isAnimation(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
+        return ext == "gif" || ext == "webp"
+    }
+
     private fun outputExtensionFor(name: String): String {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
         return if (ext in ENCODABLE_OUTPUT) ext else "png"
@@ -1337,7 +1344,10 @@ class MainActivity : Activity() {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
         // Output follows the input format where we can encode it, else PNG.
-        val output = File(outDir, "swapped_$stamp.${outputExtensionFor(target.name)}")
+        // Animated inputs are written as GIF; everything else follows the input.
+        val animated = isAnimation(target.name)
+        val outExt = if (animated) "gif" else outputExtensionFor(target.name)
+        val output = File(outDir, "swapped_$stamp.$outExt")
 
         setBusy(true, "Swapping …")
         startProgressPolling()
@@ -1347,7 +1357,19 @@ class MainActivity : Activity() {
         val manual = multiFaceMode == 2
         val sources = sourceFiles.map { it.absolutePath }
         Thread {
-            val result = if (manual) {
+            val result = if (animated) {
+                NativeBridge.swapAnimation(
+                    this,
+                    sources,
+                    target.absolutePath,
+                    output.absolutePath,
+                    if (manual) manualPairs else emptyList(),
+                    swapperFile,
+                    useMouthMask,
+                    pixelBoost,
+                    strength,
+                )
+            } else if (manual) {
                 NativeBridge.swapMapped(
                     this,
                     sources,
@@ -1376,7 +1398,8 @@ class MainActivity : Activity() {
                 stopProgressPolling()
                 setBusy(false, null)
                 if (result.ok) {
-                    log("Swap complete → ${output.absolutePath}")
+                    val frames = if (result.frames > 0) " (${result.frames} frames)" else ""
+                    log("Swap complete$frames → ${output.absolutePath}")
                     resultPreview.setImageURI(Uri.fromFile(output))
                     resultPreview.visibility = View.VISIBLE
                     toast("Done")
@@ -1464,7 +1487,7 @@ class MainActivity : Activity() {
                     0.55f
                 }
                 label = if (p.facesTotal > 1) {
-                    "Swapping faces ${p.facesDone}/${p.facesTotal}"
+                    "Swapping ${p.facesDone}/${p.facesTotal}"
                 } else {
                     "Swapping"
                 }
@@ -1505,7 +1528,7 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.8.0"
+        const val APP_VERSION = "0.9.0"
 
         /** Preset chip labels; the last one is a state, not a value set. */
         val PRESETS = listOf("Fast", "Balanced", "Quality", "Max", "Custom")
