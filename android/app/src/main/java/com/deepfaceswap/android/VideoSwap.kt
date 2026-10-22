@@ -50,6 +50,7 @@ class VideoSwap(private val context: Context) {
         useMouthMask: Boolean,
         pixelBoost: Int,
         enhancerStrength: Float,
+        keepAudio: Boolean,
         onMessage: (String) -> Unit,
         onFrame: (Int, Int) -> Unit,
     ): Result {
@@ -174,7 +175,8 @@ class VideoSwap(private val context: Context) {
             }
 
             // ---- audio passthrough
-            if (audioTrack >= 0) {
+            // Audio is copied through untouched, unless the user asked for silence.
+            if (audioTrack >= 0 && keepAudio) {
                 copyAudio(extractor, audioTrack, muxer)
             }
 

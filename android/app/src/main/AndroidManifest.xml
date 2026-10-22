@@ -21,7 +21,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.DeepFaceSwap">
+        android:theme="@style/Theme.Roop">
 
         <activity
             android:name=".MainActivity"
@@ -32,6 +32,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Serves finished results to other apps for sharing. Android will not
+             accept a file:// URI, and this avoids pulling in AndroidX. -->
+        <provider
+            android:name=".RoopFiles"
+            android:authorities="com.deepfaceswap.android.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 
 </manifest>

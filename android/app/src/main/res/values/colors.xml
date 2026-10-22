@@ -1,15 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Roop palette. Values are the specification's starting points. -->
 <resources>
-    <color name="bg">#FF0E0F12</color>
-    <color name="surface">#FF17181C</color>
-    <color name="surface_alt">#FF1F2126</color>
-    <color name="stroke">#FF2A2D34</color>
-    <color name="divider">#FF23262C</color>
-    <color name="text">#FFECEDEF</color>
-    <color name="text_dim">#FF9AA0A6</color>
-    <color name="accent">#FF4FD1C5</color>
-    <color name="accent_dim">#FF2C7A73</color>
-    <color name="white">#FFFFFFFF</color>
-    <color name="danger">#FFFF6B6B</color>
-    <color name="ok">#FF7FD1A6</color>
+    <color name="canvas">#F5F8FF</color>
+    <color name="canvas_cool">#EEF4FF</color>
+
+    <color name="surface">#EBFFFFFF</color>
+    <color name="surface_solid">#FFFFFF</color>
+    <color name="surface_soft">#F2F6FF</color>
+    <color name="surface_selected">#E2EBFF</color>
+
+    <color name="ink">#11172B</color>
+    <color name="ink_secondary">#536181</color>
+    <color name="ink_muted">#7D89A8</color>
+
+    <color name="border">#FFFFFF</color>
+    <color name="border_cool">#D8E2F5</color>
+
+    <color name="blue">#1677FF</color>
+    <color name="cyan">#12C8F5</color>
+    <color name="violet">#7955F7</color>
+    <color name="lavender">#E9E4FF</color>
+
+    <color name="success">#149B76</color>
+    <color name="warning">#B97712</color>
+    <color name="danger">#C93B52</color>
+
+    <color name="shadow_tint">#B7C9EE</color>
+
+    <!-- Gradient stops, named separately so drawables stay readable. -->
+    <color name="grad_start">#12C8F5</color>
+    <color name="grad_mid">#1677FF</color>
+    <color name="grad_end">#8055F7</color>
+
+    <!-- Scrim behind labels that sit on top of thumbnails. -->
+    <color name="scrim">#8C0A0F1F</color>
 </resources>
