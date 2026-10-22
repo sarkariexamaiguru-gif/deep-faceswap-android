@@ -1400,7 +1400,7 @@ class MainActivity : Activity() {
         val all = models.models()
         val installedCount = all.count { it.installed }
         inventoryCard.addView(RoopUi.text(this,
-            "Engine $appVersion()  \u00B7  Present: $installedCount/${all.size}  \u00B7  " +
+            "Engine ${appVersion()}  \u00B7  Present: $installedCount/${all.size}  \u00B7  " +
                 ModelManager.humanSize(models.totalBytes()) + " on disk",
             12f, R.color.ink_secondary, 1).apply {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1681,10 +1681,11 @@ class MainActivity : Activity() {
                     runCatching { File(model.file.absolutePath).delete() }
                     renderSettings()
                 }
-                else -> toast(
-                    "${model.fileName} \u00B7 ${model.approxSize} \u00B7 ${model.licence} \u00B7 " +
-                        if (model.installed) "installed" else "not downloaded",
-                )
+                else -> {
+                    val state = if (model.installed) "installed" else "not downloaded"
+                    toast("${model.fileName} \u00B7 ${model.approxSize} \u00B7 " +
+                        "${model.licence} \u00B7 $state")
+                }
             }
         }
     }
