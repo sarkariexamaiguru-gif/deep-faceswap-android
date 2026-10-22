@@ -209,7 +209,7 @@ class VideoSwap(private val context: Context) {
     ): Bitmap {
         return try {
             FileOutputStream(inFile).use { frame.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            val result = NativeBridge.sessionSwapFrame(
+            val result = NativeBridge.swapSessionFrame(
                 inFile.absolutePath, outFile.absolutePath, mappingSpec,
                 useMouthMask, pixelBoost, enhancerStrength,
             )
