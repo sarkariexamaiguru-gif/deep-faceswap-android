@@ -24,6 +24,31 @@ use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::time::Instant;
 
+/// Coarse progress stages reported while a swap runs.
+///
+/// These exist so a host (the Android app) can show honest progress: a still
+/// image is a single pass, so there is no percentage to report — only which
+/// stage is currently running, and how many faces have been done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum SwapStage {
+    /// Loading the detector / recogniser / swapper models.
+    LoadingModels = 0,
+    /// Loading and scanning the source image(s).
+    LoadingSource = 1,
+    /// Loading the target and detecting faces in it.
+    DetectingFaces = 2,
+    /// Swapping faces (and enhancing, per face).
+    Swapping = 3,
+    /// Writing the result.
+    Saving = 4,
+    /// Finished.
+    Done = 5,
+}
+
+/// Callback signature: `(stage, faces_done, faces_total)`.
+pub type StageCallback<'a> = &'a mut dyn FnMut(SwapStage, usize, usize);
+
 /// Swap a single source face into a single target face
 ///
 /// # Arguments
@@ -130,12 +155,16 @@ pub fn swap_with_mappings(
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
     use_mouth_mask: bool,
+    on_stage: StageCallback,
 ) -> Result<f64> {
     log_main!(
         "multi_face",
         "Processing face mappings",
         count = mappings.len()
     );
+
+    let total_faces = mappings.len();
+    on_stage(SwapStage::Swapping, 0, total_faces);
 
     let start_time = Instant::now();
 
@@ -154,7 +183,7 @@ pub fn swap_with_mappings(
     }
 
     // Swap each mapped face
-    for mapping in mappings {
+    for (face_index, mapping) in mappings.iter().enumerate() {
         log_additional!(
             "multi_face",
             "Swapping face",
@@ -177,45 +206,44 @@ pub fn swap_with_mappings(
             landmark_detector,
             use_mouth_mask,
         )?;
+
+        on_stage(SwapStage::Swapping, face_index + 1, total_faces);
     }
 
     Ok(start_time.elapsed().as_secs_f64())
 }
 
-/// Swap multiple faces in target image based on interactive face mapping
+/// Swap a face from a source image into a target image.
 ///
-/// CLI-oriented wrapper that builds face mappings via interactive prompts,
-/// then delegates to swap_with_mappings.
-fn swap_multiple_faces(
-    source_face_infos: &[SourceFaceInfo],
-    target_faces: &[DetectedFace],
-    source_images: &[Array3<u8>],
-    target_image: &mut Array3<u8>,
-    recognizer: &mut FaceRecognizer,
-    swapper: &mut FaceSwapper,
-    enhancer: &mut Option<FaceEnhancer>,
-    landmark_detector: &mut Option<LandmarkDetector>,
+/// This is the image entry point the Android app uses. Multi-face mode maps the
+/// highest-scoring source face onto **every** detected target face. It never
+/// prompts: an interactive mapping would need a terminal, and a mobile app has
+/// none. Use [`swap_faces_reporting`] to observe progress.
+#[allow(clippy::too_many_arguments)]
+pub fn swap_faces(
+    source_path: &str,
+    target_path: &str,
+    output_path: &str,
+    detector_model: &str,
+    recognizer_model: &str,
+    swapper_model: &str,
+    enhancer_model: Option<&str>,
+    landmark_model: Option<&str>,
     use_mouth_mask: bool,
-) -> Result<f64> {
-    // Build face mappings via interactive prompts
-    let mappings = multi_face::build_face_mappings(
-        source_face_infos,
-        target_faces,
-        source_images,
-        target_image,
-    )?;
-
-    swap_with_mappings(
-        source_face_infos,
-        target_faces,
-        source_images,
-        target_image,
-        &mappings,
-        recognizer,
-        swapper,
-        enhancer,
-        landmark_detector,
+    use_multi_face: bool,
+) -> Result<()> {
+    swap_faces_reporting(
+        source_path,
+        target_path,
+        output_path,
+        detector_model,
+        recognizer_model,
+        swapper_model,
+        enhancer_model,
+        landmark_model,
         use_mouth_mask,
+        use_multi_face,
+        &mut |_, _, _| {},
     )
 }
 
@@ -233,11 +261,11 @@ fn swap_multiple_faces(
 /// * `landmark_model` - Optional path to 106-point landmark model (2d106det.onnx).
 /// Required when `mouth_mask` is true.
 /// * `mouth_mask` - Whether to apply mouth mask to preserve target's mouth expression
-/// * `multi_face` - Whether to enable multi-face processing with interactive mapping
+/// * `multi_face` - Swap every detected target face instead of only the best one
 ///
 /// # Returns
 /// `Ok(())` on success, error otherwise
-pub fn swap_faces(
+pub fn swap_faces_reporting(
     source_path: &str,
     target_path: &str,
     output_path: &str,
@@ -248,6 +276,7 @@ pub fn swap_faces(
     landmark_model: Option<&str>,
     use_mouth_mask: bool,
     use_multi_face: bool,
+    on_stage: StageCallback,
 ) -> Result<()> {
     log_main!(
         "swap_init",
@@ -258,6 +287,7 @@ pub fn swap_faces(
         multi_face = use_multi_face
     );
 
+    on_stage(SwapStage::LoadingModels, 0, 0);
     let mut detector = FaceDetector::new(detector_model)?;
     let mut recognizer = FaceRecognizer::new(recognizer_model)?;
     let mut swapper = FaceSwapper::new(swapper_model)?;
@@ -274,6 +304,8 @@ pub fn swap_faces(
     } else {
         None
     };
+
+    on_stage(SwapStage::LoadingSource, 0, 0);
 
     let action_start = Instant::now();
     let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
@@ -329,6 +361,8 @@ pub fn swap_faces(
         elapsed_s = action_start.elapsed().as_secs_f64()
     );
 
+    on_stage(SwapStage::DetectingFaces, 0, 0);
+
     let action_start = Instant::now();
     let target_img = img_io::load_image(target_path)?;
     let target_rgb = img_io::to_rgb8(&target_img);
@@ -347,76 +381,56 @@ pub fn swap_faces(
 
     let mut result = target_array.clone();
 
-    // Branch: multi-face or single-face swap
-    if use_multi_face && (all_source_faces.len() > 1 || target_faces.len() > 1) {
+    // Build the mapping explicitly instead of prompting on stdin. Multi-face
+    // maps the highest-scoring source face onto every detected target face;
+    // otherwise it is a single 1:1 swap of the best faces.
+    let mappings: Vec<crate::types::FaceMapping> = if use_multi_face && target_faces.len() > 1 {
         log_main!(
             "multi_face",
             "Multi-face mode enabled",
             source_count = all_source_faces.len(),
             target_count = target_faces.len()
         );
-
-        let elapsed_s = swap_multiple_faces(
-            &all_source_faces,
-            &target_faces,
-            &source_images,
-            &mut result,
-            &mut recognizer,
-            &mut swapper,
-            &mut enhancer,
-            &mut landmark_detector,
-            use_mouth_mask,
-        )?;
-        log_main!(
-            "multi_face",
-            "Multi-face swap complete",
-            elapsed_s = elapsed_s
-        );
+        (0..target_faces.len())
+            .map(|target_idx| crate::types::FaceMapping {
+                source_idx: 0,
+                target_idx,
+            })
+            .collect()
     } else {
-        // Single face swap (use first face from each)
-        let source_face_info = &all_source_faces[0];
-        let source_face = &source_face_info.face;
-        let source_image = &source_images[source_face_info.source_image_index];
-        let target_face = &target_faces[0];
+        vec![crate::types::FaceMapping {
+            source_idx: 0,
+            target_idx: 0,
+        }]
+    };
 
-        if all_source_faces.len() > 1 {
-            log_main!(
-                EVENT_FACE_DETECTED,
-                "Multiple source faces detected, using highest score",
-                filename = &source_face_info.source_filename,
-                score = source_face.det_score
-            );
-        }
+    let elapsed_s = swap_with_mappings(
+        &all_source_faces,
+        &target_faces,
+        &source_images,
+        &mut result,
+        &mappings,
+        &mut recognizer,
+        &mut swapper,
+        &mut enhancer,
+        &mut landmark_detector,
+        use_mouth_mask,
+        on_stage,
+    )?;
+    log_main!(
+        "face_swap",
+        "Face swap complete",
+        faces = mappings.len(),
+        elapsed_s = elapsed_s
+    );
 
-        if target_faces.len() > 1 {
-            log_main!(
-                EVENT_FACE_DETECTED,
-                "Multiple target faces, using highest score",
-                score = target_face.det_score
-            );
-        }
-
-        log_additional!(EVENT_ALIGN_FACE, "Aligning source face");
-        let source_aligned = alignment::align_face(source_image, source_face, 112)?;
-        let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
-
-        let elapsed_s = swap_single_pair(
-            &mut result,
-            target_face,
-            source_image,
-            &source_embedding,
-            &mut swapper,
-            &mut enhancer,
-            &mut landmark_detector,
-            use_mouth_mask,
-        )?;
-        log_main!("face_swap", "Face swap complete", elapsed_s = elapsed_s);
-    }
+    on_stage(SwapStage::Saving, 0, 0);
 
     let result_img = rgb::array3_to_rgb(&result);
     img_io::save_image(&result_img, output_path)?;
 
     log_main!(EVENT_COMPLETE, "Face swap completed successfully");
+    on_stage(SwapStage::Done, 0, 0);
     Ok(())
 }
 

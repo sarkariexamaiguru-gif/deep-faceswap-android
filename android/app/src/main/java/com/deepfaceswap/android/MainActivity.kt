@@ -36,8 +36,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Dark, card-based UI: bottom navigation (Swap / Live / Settings), sub-tabs and
- * per-model rows in Settings, and toggle rows for the swap options.
+ * Dark, card-based UI: bottom navigation (Swap / Settings), sub-tabs in
+ * Settings (Models / Quality / Device / About), and a real staged progress bar
+ * fed by the native engine while a swap runs.
  *
  * Framework widgets only — no AndroidX — so the build stays dependency-free.
  */
@@ -74,6 +75,8 @@ class MainActivity : Activity() {
     private lateinit var multiFace: Switch
     private lateinit var startButton: Button
     private lateinit var progress: ProgressBar
+    private lateinit var stageLabel: TextView
+    private var polling = false
     private lateinit var resultPreview: ImageView
     private lateinit var logView: TextView
 
@@ -118,7 +121,6 @@ class MainActivity : Activity() {
         root.addView(buildBottomNav())
 
         tabs.add(buildSwapTab())
-        tabs.add(buildLiveTab())
         tabs.add(buildSettingsTab())
         tabs.forEach {
             it.visibility = View.GONE
@@ -154,8 +156,8 @@ class MainActivity : Activity() {
             setBackgroundColor(getColor(R.color.surface))
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
-        val labels = listOf("Swap", "Live", "Settings")
-        val icons = listOf(R.drawable.ic_nav_swap, R.drawable.ic_nav_live, R.drawable.ic_nav_settings)
+        val labels = listOf("Swap", "Settings")
+        val icons = listOf(R.drawable.ic_nav_swap, R.drawable.ic_nav_settings)
         for (i in labels.indices) {
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -224,21 +226,7 @@ class MainActivity : Activity() {
         targetCaption = caption("The photo to swap the face ONTO")
         col.addView(targetCaption)
 
-        val options = card()
-        mouthMask = addToggle(
-            options,
-            "Preserve target mouth",
-            "Keep the target's mouth expression",
-            false,
-        )
-        options.addView(divider())
-        multiFace = addToggle(
-            options,
-            "Multi-face",
-            "Swap every detected face (no mapping UI on device)",
-            false,
-        )
-        col.addView(options)
+        col.addView(caption("Swap options live in Settings \u203A Quality"))
 
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -266,12 +254,20 @@ class MainActivity : Activity() {
         buttonRow.addView(resetButton)
         col.addView(buttonRow)
 
-        progress = ProgressBar(this).apply {
+        stageLabel = TextView(this).apply {
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 13f
             visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = dp(12)
-            }
+            setPadding(0, dp(14), 0, dp(6))
+        }
+        col.addView(stageLabel)
+
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            visibility = View.GONE
+            progressTintList = getColorStateList(R.color.white)
+            progressBackgroundTintList = getColorStateList(R.color.divider)
+            layoutParams = LinearLayout.LayoutParams(mp, dp(6))
         }
         col.addView(progress)
 
@@ -352,27 +348,6 @@ class MainActivity : Activity() {
     }
 
     // ------------------------------------------------------------- live tab --
-
-    private fun buildLiveTab(): View {
-        val col = column()
-        col.addView(pageTitle("Live"))
-        val c = card()
-        c.addView(sectionLabel("LIVE CAMERA"))
-        c.addView(TextView(this).apply {
-            text = "Real-time camera swapping isn't part of this Android port.\n\n" +
-                "This build runs the Rust engine on still images. A live mode would " +
-                "need a camera pipeline plus per-frame inference, which is a much " +
-                "larger piece of work than the image path.\n\n" +
-                "Use the Swap tab for photos. For live swapping, the upstream " +
-                "desktop build is the right tool."
-            setTextColor(getColor(R.color.text))
-            textSize = 14f
-            setLineSpacing(dp(4).toFloat(), 1f)
-        })
-        col.addView(c)
-        return scroll(col)
-    }
-
     // --------------------------------------------------------- settings tab --
 
     private fun buildSettingsTab(): View {
@@ -384,6 +359,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(mp, 0, 1f)
         }
         subtabPages.add(buildModelsPage())
+        subtabPages.add(buildQualityPage())
         subtabPages.add(buildDevicePage())
         subtabPages.add(buildAboutPage())
         subtabPages.forEach {
@@ -399,7 +375,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(getColor(R.color.surface))
         }
-        listOf("Models", "Device", "About").forEachIndexed { i, name ->
+        listOf("Models", "Quality", "Device", "About").forEachIndexed { i, name ->
             val col = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -435,6 +411,39 @@ class MainActivity : Activity() {
         subtabIndicators.forEachIndexed { i, v ->
             v.visibility = if (i == index) View.VISIBLE else View.INVISIBLE
         }
+    }
+
+    private fun buildQualityPage(): View {
+        val col = column()
+        col.addView(sectionLabel("SWAP OPTIONS"))
+
+        val options = card()
+        mouthMask = addToggle(
+            options,
+            "Preserve target mouth",
+            "Keep the target's mouth expression",
+            false,
+        )
+        options.addView(divider())
+        multiFace = addToggle(
+            options,
+            "Swap every face",
+            "Swap all detected faces, not just the largest",
+            false,
+        )
+        col.addView(options)
+
+        col.addView(sectionLabel("COMING NEXT"))
+        val next = card()
+        next.addView(TextView(this).apply {
+            text = "Pixel boost and the enhancer (master) model arrive in the next phase, " +
+                "together with the pipeline builder for chaining models."
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 13.5f
+            setLineSpacing(dp(4).toFloat(), 1f)
+        })
+        col.addView(next)
+        return scroll(col)
     }
 
     private fun buildModelsPage(): View {
@@ -879,6 +888,7 @@ class MainActivity : Activity() {
         val output = File(outDir, "swapped_$stamp.jpg")
 
         setBusy(true, "Swapping …")
+        startProgressPolling()
         Thread {
             val result = NativeBridge.swap(
                 this,
@@ -889,6 +899,7 @@ class MainActivity : Activity() {
                 multiFace.isChecked,
             )
             io.post {
+                stopProgressPolling()
                 setBusy(false, null)
                 if (result.ok) {
                     log("Swap complete → ${output.absolutePath}")
@@ -938,10 +949,65 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // ------------------------------------------------------------- progress --
+
+    /**
+     * Polls the native stage counter while a swap runs. A still image is a single
+     * inference pass, so there is no true percentage — we show which stage is
+     * running and how many faces are done, and only ever move forward.
+     */
+    private val progressPoll = object : Runnable {
+        override fun run() {
+            if (!polling) return
+            renderStage(NativeBridge.progressSnapshot())
+            io.postDelayed(this, 150L)
+        }
+    }
+
+    private fun startProgressPolling() {
+        polling = true
+        if (::progress.isInitialized) progress.progress = 0
+        if (::stageLabel.isInitialized) stageLabel.text = "Starting"
+        io.post(progressPoll)
+    }
+
+    private fun stopProgressPolling() {
+        polling = false
+        io.removeCallbacks(progressPoll)
+    }
+
+    private fun renderStage(p: NativeBridge.Progress) {
+        val label: String
+        val fraction: Float
+        when (p.stage) {
+            NativeBridge.Stage.LOADING_MODELS -> { label = "Loading models"; fraction = 0.08f }
+            NativeBridge.Stage.LOADING_SOURCE -> { label = "Scanning source"; fraction = 0.25f }
+            NativeBridge.Stage.DETECTING -> { label = "Detecting faces"; fraction = 0.45f }
+            NativeBridge.Stage.SWAPPING -> {
+                fraction = if (p.facesTotal > 0) {
+                    0.55f + 0.35f * (p.facesDone.toFloat() / p.facesTotal.toFloat())
+                } else {
+                    0.55f
+                }
+                label = if (p.facesTotal > 1) {
+                    "Swapping faces ${p.facesDone}/${p.facesTotal}"
+                } else {
+                    "Swapping"
+                }
+            }
+            NativeBridge.Stage.SAVING -> { label = "Saving"; fraction = 0.95f }
+            NativeBridge.Stage.DONE -> { label = "Done"; fraction = 1f }
+            NativeBridge.Stage.IDLE -> { label = "Working"; fraction = 0.05f }
+        }
+        if (::stageLabel.isInitialized) stageLabel.text = label
+        if (::progress.isInitialized) progress.progress = (fraction * 100).toInt()
+    }
+
     // -------------------------------------------------------------- helpers --
 
     private fun setBusy(busy: Boolean, message: String?) {
         if (::progress.isInitialized) progress.visibility = if (busy) View.VISIBLE else View.GONE
+        if (::stageLabel.isInitialized) stageLabel.visibility = if (busy) View.VISIBLE else View.GONE
         if (::startButton.isInitialized) {
             startButton.isEnabled = !busy
             startButton.alpha = if (busy) 0.5f else 1f
@@ -962,6 +1028,6 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.3.0"
+        const val APP_VERSION = "0.4.0"
     }
 }

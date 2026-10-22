@@ -33,6 +33,46 @@ object NativeBridge {
 
     private external fun coreVersion(): String
 
+    /** Current swap stage, or -1 when no swap is running. */
+    private external fun progress(): Int
+
+    /** Face progress packed as `(done shl 16) or total`. */
+    private external fun faceProgress(): Int
+
+    /** Coarse stages reported by the native engine. */
+    enum class Stage {
+        IDLE, LOADING_MODELS, LOADING_SOURCE, DETECTING, SWAPPING, SAVING, DONE;
+
+        companion object {
+            fun from(code: Int): Stage = when (code) {
+                0 -> LOADING_MODELS
+                1 -> LOADING_SOURCE
+                2 -> DETECTING
+                3 -> SWAPPING
+                4 -> SAVING
+                5 -> DONE
+                else -> IDLE
+            }
+        }
+    }
+
+    /** Live progress snapshot: stage plus how many faces are done. */
+    data class Progress(val stage: Stage, val facesDone: Int, val facesTotal: Int)
+
+    /**
+     * Read the current stage and face counts. Safe to call from the UI thread —
+     * it is two atomic loads on the native side.
+     */
+    fun progressSnapshot(): Progress {
+        val stage = Stage.from(runCatching { progress() }.getOrDefault(-1))
+        val packed = runCatching { faceProgress() }.getOrDefault(0)
+        return Progress(
+            stage = stage,
+            facesDone = (packed ushr 16) and 0xFFFF,
+            facesTotal = packed and 0xFFFF,
+        )
+    }
+
     /** Engine version string, e.g. `0.1.0`. */
     fun version(): String = runCatching { coreVersion() }.getOrDefault("unknown")
 
