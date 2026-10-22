@@ -13,7 +13,9 @@ use crate::types::{DetectedFace, FaceSwapError, Result, SourceFaceInfo};
 use crate::types::ClusterMapping;
 use crate::utils::image as img_io;
 use crate::utils::rgb;
-use crate::verbose::{EVENT_ALIGN_FACE, EVENT_COMPLETE, EVENT_FACE_DETECTED, EVENT_PASTE_BACK};
+use crate::verbose::{
+    EVENT_ALIGN_FACE, EVENT_COMPLETE, EVENT_FACE_DETECTED, EVENT_LOAD_MODEL, EVENT_PASTE_BACK,
+};
 #[cfg(feature = "video")]
 use crate::video::{
     build_cluster_info, build_face_lookup, cluster_faces, extract_frames, scan_frames_for_faces,
