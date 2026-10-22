@@ -166,7 +166,7 @@ impl FaceSwapper {
             log_main!(
                 EVENT_LOAD_MODEL,
                 "Loading embedding converter",
-                path = path.to_string_lossy()
+                path = path.display().to_string()
             );
             Some(Self::load_session(&path.to_string_lossy())?)
         } else {
@@ -277,7 +277,11 @@ impl FaceSwapper {
     ///
     /// Taking the declared first output rather than assuming a name keeps this
     /// working across families whose output tensors are named differently.
-    fn run_first_output(session: &Session, input_name: &str, input: &Array2<f32>) -> Result<Array2<f32>> {
+    fn run_first_output(
+        session: &mut Session,
+        input_name: &str,
+        input: &Array2<f32>,
+    ) -> Result<Array2<f32>> {
         let output_name = session
             .outputs()
             .first()
@@ -315,7 +319,7 @@ impl FaceSwapper {
 
         // Ghost: map through the converter and use the result as-is — the
         // reference pipeline does not re-normalize this one.
-        if let Some(converter) = self.converter.as_ref() {
+        if let Some(converter) = self.converter.as_mut() {
             let input = Array2::from_shape_vec((1, 512), source_embedding.to_vec())
                 .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?;
             return Self::run_first_output(converter, "input", &input);
@@ -386,31 +390,35 @@ impl FaceSwapper {
             .map(|output| output.name().to_string())
             .ok_or_else(|| FaceSwapError::Ort("swapper model declares no outputs".to_string()))?;
 
-        let outputs = match source_frame {
-            Some(frame) => self.session.run(inputs![
-                "target" => TensorRef::from_array_view(target_input.view())?,
-                "source" => TensorRef::from_array_view(frame.view())?
-            ]),
-            None => {
-                let source = source_matrix
-                    .as_ref()
-                    .ok_or_else(|| FaceSwapError::ProcessingError("missing source input".to_string()))?;
-                self.session.run(inputs![
+        // The outputs hold a borrow of the session, so take what we need and let
+        // them drop before touching self again.
+        let swapped = {
+            let outputs = match source_frame {
+                Some(frame) => self.session.run(inputs![
                     "target" => TensorRef::from_array_view(target_input.view())?,
-                    "source" => TensorRef::from_array_view(source.view())?
-                ])
+                    "source" => TensorRef::from_array_view(frame.view())?
+                ]),
+                None => {
+                    let source = source_matrix.as_ref().ok_or_else(|| {
+                        FaceSwapError::ProcessingError("missing source input".to_string())
+                    })?;
+                    self.session.run(inputs![
+                        "target" => TensorRef::from_array_view(target_input.view())?,
+                        "source" => TensorRef::from_array_view(source.view())?
+                    ])
+                }
             }
-        }
-        .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?;
+            .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?;
 
-        let array_d = outputs[output_name.as_str()]
-            .try_extract_array::<f32>()
-            .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
-            .into_owned();
+            let array_d = outputs[output_name.as_str()]
+                .try_extract_array::<f32>()
+                .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
+                .into_owned();
 
-        let swapped = array_d
-            .into_dimensionality::<ndarray::Ix4>()
-            .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?;
+            array_d
+                .into_dimensionality::<ndarray::Ix4>()
+                .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?
+        };
 
         Ok(self.unscale_output(swapped))
     }
