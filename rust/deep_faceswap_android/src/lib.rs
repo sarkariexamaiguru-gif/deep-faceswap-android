@@ -13,8 +13,9 @@ use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jfloat, jint, jstring};
 use jni::JNIEnv;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Mutex;
 
-use deep_faceswap_core::swap::{SwapOptions, SwapStage, MAX_PIXEL_BOOST};
+use deep_faceswap_core::swap::{SwapOptions, SwapSession, SwapStage, MAX_PIXEL_BOOST};
 
 /// Latest progress stage, polled from Kotlin while the swap runs on a worker
 /// thread. `-1` means "no swap in flight".
@@ -23,6 +24,10 @@ static STAGE: AtomicI32 = AtomicI32::new(-1);
 static FACES_DONE: AtomicI32 = AtomicI32::new(0);
 /// Faces the current swap will process.
 static FACES_TOTAL: AtomicI32 = AtomicI32::new(0);
+
+/// Long-lived swap session used by the video pipeline, so the models and the
+/// source faces are loaded once rather than once per frame.
+static SESSION: Mutex<Option<SwapSession>> = Mutex::new(None);
 
 /// Copy a Java string into a Rust `String` (empty string on failure).
 fn jstring_to_string(env: &mut JNIEnv, s: &JString) -> String {
@@ -408,5 +413,151 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapAnimation(
         }
     };
 
+    to_jstring(&mut env, payload)
+}
+
+/// Open a reusable swap session for a frame sequence.
+///
+/// Loads the models and the source face(s) once; every later `sessionSwapFrame`
+/// reuses them. Replaces any previously open session.
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionOpen(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_paths: JString,
+    detector: JString,
+    recognizer: JString,
+    swapper: JString,
+    enhancer: JString,
+    landmark: JString,
+    use_mouth_mask: jboolean,
+) -> jstring {
+    let source = jstring_to_string(&mut env, &source_paths);
+    let detector = jstring_to_string(&mut env, &detector);
+    let recognizer = jstring_to_string(&mut env, &recognizer);
+    let swapper = jstring_to_string(&mut env, &swapper);
+    let enhancer = jstring_to_string(&mut env, &enhancer);
+    let landmark = jstring_to_string(&mut env, &landmark);
+    let mouth_mask = use_mouth_mask != 0;
+
+    let enhancer_opt = if enhancer.is_empty() { None } else { Some(enhancer.as_str()) };
+    let landmark_opt = if landmark.is_empty() { None } else { Some(landmark.as_str()) };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        SwapSession::new(
+            &source,
+            &detector,
+            &recognizer,
+            &swapper,
+            enhancer_opt,
+            landmark_opt,
+            mouth_mask,
+        )
+    }));
+
+    let payload = match result {
+        Ok(Ok(session)) => {
+            let faces = session.source_face_count();
+            match SESSION.lock() {
+                Ok(mut guard) => {
+                    *guard = Some(session);
+                    serde_json::json!({ "ok": true, "source_faces": faces }).to_string()
+                }
+                Err(_) => serde_json::json!({
+                    "ok": false,
+                    "error": "session lock poisoned"
+                })
+                .to_string(),
+            }
+        }
+        Ok(Err(e)) => serde_json::json!({ "ok": false, "error": e.to_string() }).to_string(),
+        Err(_) => serde_json::json!({
+            "ok": false,
+            "error": "native panic while opening the swap session"
+        })
+        .to_string(),
+    };
+
+    to_jstring(&mut env, payload)
+}
+
+/// Swap one frame using the open session.
+///
+/// `mappings` uses the same `"s:t,s:t"` spec; an empty string maps automatically.
+/// Returns the number of faces swapped in this frame (0 means the frame was
+/// passed through unchanged because no face was found).
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFrame(
+    mut env: JNIEnv,
+    _class: JClass,
+    frame_in: JString,
+    frame_out: JString,
+    mappings: JString,
+    use_mouth_mask: jboolean,
+    pixel_boost: jint,
+    enhancer_strength: jfloat,
+) -> jstring {
+    let frame_in = jstring_to_string(&mut env, &frame_in);
+    let frame_out = jstring_to_string(&mut env, &frame_out);
+    let mapping_spec = jstring_to_string(&mut env, &mappings);
+
+    let pairs: Vec<(usize, usize)> = mapping_spec
+        .split(',')
+        .filter(|pair| !pair.trim().is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.split(':');
+            let source_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            let target_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            Some((source_idx, target_idx))
+        })
+        .collect();
+
+    let opts = SwapOptions {
+        use_mouth_mask: use_mouth_mask != 0,
+        use_multi_face: pairs.is_empty(),
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
+        enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut guard = SESSION
+            .lock()
+            .map_err(|_| "session lock poisoned".to_string())?;
+        let session = guard
+            .as_mut()
+            .ok_or_else(|| "no swap session is open".to_string())?;
+        session
+            .swap_frame(&frame_in, &frame_out, opts, &pairs)
+            .map_err(|e| e.to_string())
+    }));
+
+    let payload = match result {
+        Ok(Ok(faces)) => serde_json::json!({ "ok": true, "faces": faces }).to_string(),
+        Ok(Err(e)) => serde_json::json!({ "ok": false, "error": e }).to_string(),
+        Err(_) => serde_json::json!({
+            "ok": false,
+            "error": "native panic while swapping a frame"
+        })
+        .to_string(),
+    };
+
+    to_jstring(&mut env, payload)
+}
+
+/// Release the swap session and free its models.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionClose(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let payload = match SESSION.lock() {
+        Ok(mut guard) => {
+            *guard = None;
+            serde_json::json!({ "ok": true }).to_string()
+        }
+        Err(_) => serde_json::json!({ "ok": false, "error": "session lock poisoned" }).to_string(),
+    };
     to_jstring(&mut env, payload)
 }

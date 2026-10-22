@@ -248,7 +248,7 @@ class MainActivity : Activity() {
         val target = pickerCard(
             label = "TARGET IMAGE",
             hint = "Pick target image",
-            onPick = { pickImages(REQ_TARGET, false) },
+            onPick = { pickImages(REQ_TARGET, false, allowVideo = true) },
             onCamera = { capture(isSource = false) },
         )
         targetPreview = target.preview
@@ -256,8 +256,8 @@ class MainActivity : Activity() {
         col.addView(target.card)
         targetCaption = caption(
             "The photo to swap the face ONTO \u00B7 JPEG \u00B7 PNG \u00B7 WebP \u00B7 GIF " +
-                "\u00B7 BMP \u00B7 TIFF \u00B7 AVIF\nAnimated GIF/WebP swaps frame by frame " +
-                "and is saved as GIF"
+                "\u00B7 BMP \u00B7 TIFF \u00B7 AVIF \u00B7 video (MP4 \u00B7 MOV \u00B7 MKV " +
+                "\u00B7 WebM)\nAnimated GIF/WebP and video swap frame by frame"
         )
         col.addView(targetCaption)
 
@@ -1127,6 +1127,12 @@ class MainActivity : Activity() {
      * their extension; anything else (AVIF, for instance, which we can read but
      * not write) falls back to PNG so nothing is silently re-encoded to JPEG.
      */
+    /** Video inputs take the media pipeline. */
+    private fun isVideo(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
+        return ext in VIDEO_EXTENSIONS
+    }
+
     /** Animated GIF / WebP inputs take the frame-by-frame path. */
     private fun isAnimation(name: String): Boolean {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
@@ -1140,10 +1146,14 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------- picking --
 
-    private fun pickImages(requestCode: Int, multiple: Boolean) {
+    private fun pickImages(requestCode: Int, multiple: Boolean, allowVideo: Boolean = false) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                if (allowVideo) arrayOf("image/*", "video/*") else arrayOf("image/*"),
+            )
             if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         startActivityForResult(intent, requestCode)
@@ -1345,18 +1355,62 @@ class MainActivity : Activity() {
         val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
         // Output follows the input format where we can encode it, else PNG.
         // Animated inputs are written as GIF; everything else follows the input.
-        val animated = isAnimation(target.name)
-        val outExt = if (animated) "gif" else outputExtensionFor(target.name)
+        val video = isVideo(target.name)
+        val animated = !video && isAnimation(target.name)
+        val outExt = when {
+            video -> "mp4"
+            animated -> "gif"
+            else -> outputExtensionFor(target.name)
+        }
         val output = File(outDir, "swapped_$stamp.$outExt")
 
         setBusy(true, "Swapping …")
-        startProgressPolling()
+        // The video path reports its own frame progress; the poller is for images.
+        if (!video) startProgressPolling()
         val useMouthMask = mouthMask.isChecked
         val strength = if (enhancerOn) enhancerStrength else 1.0f
         val manualPairs = mappings.toList()
         val manual = multiFaceMode == 2
         val sources = sourceFiles.map { it.absolutePath }
         Thread {
+            if (video) {
+                val result = VideoSwap(this).swap(
+                    input = target,
+                    output = output,
+                    sourcePaths = sources,
+                    mappings = if (manual) manualPairs else emptyList(),
+                    swapperFile = swapperFile,
+                    useMouthMask = useMouthMask,
+                    pixelBoost = pixelBoost,
+                    enhancerStrength = strength,
+                    onMessage = { message -> io.post { log(message) } },
+                    onFrame = { done, total ->
+                        io.post {
+                            if (::stageLabel.isInitialized) {
+                                stageLabel.text = "Swapping frame $done/$total"
+                            }
+                            if (::progress.isInitialized) {
+                                progress.progress = if (total > 0) {
+                                    (done * 100 / total).coerceIn(0, 100)
+                                } else {
+                                    0
+                                }
+                            }
+                        }
+                    },
+                )
+                io.post {
+                    setBusy(false, null)
+                    if (result.ok) {
+                        log("Video swap complete (${result.frames} frames) → ${output.absolutePath}")
+                        resultPreview.setImageDrawable(null)
+                        toast("Done")
+                    } else {
+                        log("Video swap failed: ${result.error}")
+                        toast("Video swap failed")
+                    }
+                }
+            } else {
             val result = if (animated) {
                 NativeBridge.swapAnimation(
                     this,
@@ -1407,6 +1461,7 @@ class MainActivity : Activity() {
                     log("Swap failed: ${result.error}")
                     toast("Swap failed")
                 }
+            }
             }
         }.start()
     }
@@ -1528,7 +1583,7 @@ class MainActivity : Activity() {
         const val REQ_TARGET = 2
         const val REQ_CAMERA = 3
         const val REQ_PERMISSION = 4
-        const val APP_VERSION = "0.9.0"
+        const val APP_VERSION = "0.10.0"
 
         /** Preset chip labels; the last one is a state, not a value set. */
         val PRESETS = listOf("Fast", "Balanced", "Quality", "Max", "Custom")
@@ -1538,5 +1593,10 @@ class MainActivity : Activity() {
          * (AVIF) or not supported at all (HEIC), so those fall back to PNG.
          */
         val ENCODABLE_OUTPUT = setOf("jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp", "gif")
+
+        /** Containers the platform media stack can usually read. */
+        val VIDEO_EXTENSIONS = setOf(
+            "mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "ts", "flv", "wmv", "mpg", "mpeg",
+        )
     }
 }

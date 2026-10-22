@@ -282,4 +282,86 @@ object NativeBridge {
         )
         return parse(json)
     }
+
+    private external fun sessionOpen(
+        sourcePaths: String,
+        detector: String,
+        recognizer: String,
+        swapper: String,
+        enhancer: String,
+        landmark: String,
+        useMouthMask: Boolean,
+    ): String
+
+    private external fun sessionSwapFrame(
+        frameIn: String,
+        frameOut: String,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): String
+
+    private external fun sessionClose(): String
+
+    /** Result of opening a swap session. */
+    data class SessionResult(val ok: Boolean, val sourceFaces: Int, val error: String?)
+
+    /**
+     * Open a reusable swap session for a frame sequence.
+     *
+     * The models and the source face(s) are loaded once, so a video does not pay
+     * the model-loading cost on every frame.
+     */
+    fun openSession(
+        context: Context,
+        sourcePaths: List<String>,
+        swapperFile: String,
+        useMouthMask: Boolean,
+    ): SessionResult {
+        val models = ModelManager(context)
+        val json = runCatching {
+            sessionOpen(
+                sourcePaths.joinToString(","),
+                models.detectorPath,
+                models.recognizerPath,
+                models.swapperPath(swapperFile),
+                if (models.enhancerInstalled) models.enhancerPath else "",
+                if (useMouthMask) models.landmarkPath else "",
+                useMouthMask,
+            )
+        }.getOrNull() ?: return SessionResult(false, 0, "native session call failed")
+
+        return try {
+            val obj = JSONObject(json)
+            SessionResult(
+                ok = obj.optBoolean("ok", false),
+                sourceFaces = obj.optInt("source_faces", 0),
+                error = if (obj.has("error")) obj.optString("error") else null,
+            )
+        } catch (e: Exception) {
+            SessionResult(false, 0, "Malformed native response")
+        }
+    }
+
+    /** Swap a single frame using the open session. */
+    fun swapSessionFrame(
+        frameIn: String,
+        frameOut: String,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): SwapResult {
+        val json = runCatching {
+            sessionSwapFrame(frameIn, frameOut, mappings, useMouthMask, pixelBoost, enhancerStrength)
+        }.getOrNull() ?: return SwapResult(false, "native frame call failed")
+        return parse(json)
+    }
+
+    /** Release the session and free its models. Safe to call when none is open. */
+    fun closeSession() {
+        runCatching { sessionClose() }
+    }
+
 }

@@ -1563,3 +1563,183 @@ pub fn swap_animation(
     on_stage(SwapStage::Done, total, total);
     Ok(total)
 }
+
+/// A reusable swap session for frame sequences.
+///
+/// The models and the source faces are loaded once and reused for every frame.
+/// Calling the one-shot image API per frame would reload every ONNX model each
+/// time, which is far too slow for video.
+pub struct SwapSession {
+    detector: FaceDetector,
+    recognizer: FaceRecognizer,
+    swapper: FaceSwapper,
+    enhancer: Option<FaceEnhancer>,
+    landmark_detector: Option<LandmarkDetector>,
+    source_images: Vec<Array3<u8>>,
+    all_source_faces: Vec<SourceFaceInfo>,
+}
+
+impl SwapSession {
+    /// Load the models and the source face(s) once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        source_path: &str,
+        detector_model: &str,
+        recognizer_model: &str,
+        swapper_model: &str,
+        enhancer_model: Option<&str>,
+        landmark_model: Option<&str>,
+        use_mouth_mask: bool,
+    ) -> Result<Self> {
+        let mut detector = FaceDetector::new(detector_model)?;
+        let recognizer = FaceRecognizer::new(recognizer_model)?;
+        let swapper = FaceSwapper::new(swapper_model)?;
+        let enhancer = enhancer_model
+            .map(|path| FaceEnhancer::new(path))
+            .transpose()?;
+        let landmark_detector = if use_mouth_mask {
+            let path = landmark_model.ok_or_else(|| {
+                FaceSwapError::InvalidInput(
+                    "Landmark model path required when mouth mask is enabled".to_string(),
+                )
+            })?;
+            Some(LandmarkDetector::new(path)?)
+        } else {
+            None
+        };
+
+        let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+        let mut source_images: Vec<Array3<u8>> = Vec::new();
+        let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
+
+        for (img_idx, path) in source_paths.iter().enumerate() {
+            let img = img_io::load_image(path)?;
+            let rgb_img = img_io::to_rgb8(&img);
+            let array = rgb::rgb_to_array3(&rgb_img);
+            let faces = detector.detect(&array, 0.5, 0.4)?;
+
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+
+            for face in faces {
+                all_source_faces.push(SourceFaceInfo {
+                    face,
+                    source_image_index: img_idx,
+                    source_filename: filename.to_string(),
+                });
+            }
+            source_images.push(array);
+        }
+
+        if all_source_faces.is_empty() {
+            return Err(FaceSwapError::NoFacesDetected);
+        }
+
+        log_main!(
+            EVENT_LOAD_MODEL,
+            "Swap session ready",
+            source_faces = all_source_faces.len(),
+            swapper_size = swapper.model_size()
+        );
+
+        Ok(Self {
+            detector,
+            recognizer,
+            swapper,
+            enhancer,
+            landmark_detector,
+            source_images,
+            all_source_faces,
+        })
+    }
+
+    /// Number of source faces detected when the session was opened.
+    pub fn source_face_count(&self) -> usize {
+        self.all_source_faces.len()
+    }
+
+    /// Swap one frame, reading `frame_in` and writing `frame_out`.
+    ///
+    /// A frame with no detectable face is copied through unchanged, which is the
+    /// right behaviour for cutaways and establishing shots. Returns the number of
+    /// faces actually swapped in this frame.
+    pub fn swap_frame(
+        &mut self,
+        frame_in: &str,
+        frame_out: &str,
+        opts: SwapOptions,
+        mappings: &[(usize, usize)],
+    ) -> Result<usize> {
+        let img = img_io::load_image(frame_in)?;
+        let rgb_img = img_io::to_rgb8(&img);
+        let mut array = rgb::rgb_to_array3(&rgb_img);
+
+        let target_faces = self.detector.detect(&array, 0.5, 0.4)?;
+        if target_faces.is_empty() {
+            img_io::save_image(&rgb_img, frame_out)?;
+            return Ok(0);
+        }
+
+        let pairs: Vec<crate::types::FaceMapping> = if mappings.is_empty() {
+            if opts.use_multi_face && target_faces.len() > 1 {
+                (0..target_faces.len())
+                    .map(|target_idx| crate::types::FaceMapping {
+                        source_idx: 0,
+                        target_idx,
+                    })
+                    .collect()
+            } else {
+                vec![crate::types::FaceMapping {
+                    source_idx: 0,
+                    target_idx: 0,
+                }]
+            }
+        } else {
+            mappings
+                .iter()
+                .filter(|(s, t)| *s < self.all_source_faces.len() && *t < target_faces.len())
+                .map(|(s, t)| crate::types::FaceMapping {
+                    source_idx: *s,
+                    target_idx: *t,
+                })
+                .collect()
+        };
+
+        if pairs.is_empty() {
+            img_io::save_image(&rgb_img, frame_out)?;
+            return Ok(0);
+        }
+
+        // Destructure so the immutable and mutable borrows of self do not overlap.
+        let Self {
+            recognizer,
+            swapper,
+            enhancer,
+            landmark_detector,
+            all_source_faces,
+            source_images,
+            ..
+        } = self;
+
+        let swapped = pairs.len();
+        let _ = swap_with_mappings(
+            all_source_faces,
+            &target_faces,
+            source_images,
+            &mut array,
+            &pairs,
+            recognizer,
+            swapper,
+            enhancer,
+            landmark_detector,
+            opts,
+            &mut |_, _, _| {},
+        )?;
+
+        let out_rgb = rgb::array3_to_rgb(&array);
+        img_io::save_image(&out_rgb, frame_out)?;
+        Ok(swapped)
+    }
+}
