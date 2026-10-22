@@ -268,9 +268,7 @@ class MainActivity : Activity() {
                 switcherRow.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
-                    background = getDrawable(
-                        if (active) R.drawable.bg_gradient_segment else android.R.color.transparent,
-                    )
+                    background = if (active) getDrawable(R.drawable.bg_gradient_segment) else null
                     setPadding(dp(6), dp(9), dp(6), dp(9))
                     layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                         .apply { if (index > 0) marginStart = dp(4) }
@@ -319,9 +317,7 @@ class MainActivity : Activity() {
             navRow.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                background = getDrawable(
-                    if (active) R.drawable.bg_pill_soft else android.R.color.transparent,
-                )
+                background = if (active) getDrawable(R.drawable.bg_pill_soft) else null
                 setPadding(0, dp(8), 0, dp(8))
                 layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 isClickable = true

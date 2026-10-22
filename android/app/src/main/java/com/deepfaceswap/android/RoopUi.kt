@@ -275,9 +275,7 @@ object RoopUi {
                 typeface = medium()
                 setPadding(0, dp(ctx, 11), 0, dp(ctx, 11))
                 setTextColor(ctx.getColor(if (active) R.color.surface_solid else R.color.ink_secondary))
-                background = ctx.getDrawable(
-                    if (active) R.drawable.bg_gradient_segment else android.R.color.transparent,
-                )
+                background = if (active) ctx.getDrawable(R.drawable.bg_gradient_segment) else null
                 layoutParams = weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     if (index > 0) marginStart = dp(ctx, 4)
                 }
