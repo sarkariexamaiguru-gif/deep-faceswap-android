@@ -221,7 +221,7 @@ class MainActivity : Activity() {
         })
         row.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        row.addView(iconButton(R.drawable.ic_gear, "Settings") { show("settings") })
+        row.addView(iconButton(R.drawable.ic_settings, "Settings") { show("settings") })
         row.addView(iconButton(R.drawable.ic_dots, "More options") { showOverflow() })
         return row
     }
@@ -310,7 +310,7 @@ class MainActivity : Activity() {
             "swap" to ("Swap" to R.drawable.ic_swap),
             "video" to ("Video" to R.drawable.ic_video),
             "history" to ("History" to R.drawable.ic_history),
-            "settings" to ("Settings" to R.drawable.ic_gear),
+            "settings" to ("Settings" to R.drawable.ic_settings),
         ).forEach { (key, spec) ->
             val (label, icon) = spec
             val active = key == current
