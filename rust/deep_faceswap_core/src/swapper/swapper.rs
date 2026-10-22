@@ -307,7 +307,7 @@ impl FaceSwapper {
         // inswapper calls it "output", and other families are free to differ.
         let output_name = self
             .session
-            .outputs
+            .outputs()
             .first()
             .map(|output| output.name.clone())
             .ok_or_else(|| FaceSwapError::Ort("swapper model declares no outputs".to_string()))?;
