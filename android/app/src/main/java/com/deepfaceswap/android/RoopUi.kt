@@ -64,6 +64,76 @@ object RoopUi {
         }
     }
 
+    /** The app mark: a gradient rounded square inside a white outer tile. */
+    fun markTile(ctx: Context): FrameLayout = FrameLayout(ctx).apply {
+        background = ctx.getDrawable(R.drawable.bg_mark_tile)
+        elevation = dp(ctx, 3).toFloat()
+        layoutParams = lp(dp(ctx, 48), dp(ctx, 48))
+        addView(FrameLayout(ctx).apply {
+            background = ctx.getDrawable(R.drawable.bg_gradient_tile)
+            layoutParams = FrameLayout.LayoutParams(dp(ctx, 42), dp(ctx, 42)).apply {
+                gravity = Gravity.CENTER
+            }
+            addView(ImageView(ctx).apply {
+                setImageResource(R.drawable.ic_mark_face)
+                layoutParams = FrameLayout.LayoutParams(dp(ctx, 24), dp(ctx, 24)).apply {
+                    gravity = Gravity.CENTER
+                }
+            })
+        })
+    }
+
+    /** Small blue disc with a white tick, for selected cards. */
+    fun checkBadge(ctx: Context): FrameLayout = FrameLayout(ctx).apply {
+        background = ctx.getDrawable(R.drawable.bg_gradient_oval)
+        layoutParams = lp(dp(ctx, 18), dp(ctx, 18))
+        addView(iconView(ctx, R.drawable.ic_check, 11, R.color.surface_solid).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(ctx, 11), dp(ctx, 11)).apply {
+                gravity = Gravity.CENTER
+            }
+        })
+    }
+
+    /** A cell for the two-column options grid. */
+    fun settingCell(ctx: Context, iconRes: Int, title: String, value: String,
+                    enabled: Boolean = true): LinearLayout =
+        LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            background = ctx.getDrawable(R.drawable.bg_card_inner)
+            setPadding(dp(ctx, 12), dp(ctx, 11), dp(ctx, 12), dp(ctx, 11))
+            alpha = if (enabled) 1f else 0.6f
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(iconView(ctx, iconRes, 17, R.color.blue))
+                addView(text(ctx, title, 12.5f, R.color.ink, 1).apply {
+                    layoutParams = margin(ctx, ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 7, 0, 0, 0)
+                })
+            })
+            addView(text(ctx, value, 11f, R.color.ink_muted).apply {
+                layoutParams = margin(ctx, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0)
+            })
+        }
+
+    /** A cell for the three-column device strip. */
+    fun deviceCell(ctx: Context, iconRes: Int, label: String, value: String): LinearLayout =
+        LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = ctx.getDrawable(R.drawable.bg_card_inner)
+            setPadding(dp(ctx, 6), dp(ctx, 12), dp(ctx, 6), dp(ctx, 12))
+            addView(iconView(ctx, iconRes, 16, R.color.blue))
+            addView(text(ctx, label.uppercase(java.util.Locale.US), 9.5f, R.color.ink_muted, 1).apply {
+                letterSpacing = 0.06f
+                gravity = Gravity.CENTER
+                layoutParams = margin(ctx, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 7, 0, 3)
+            })
+            addView(text(ctx, value, 12f, R.color.ink, 1).apply { gravity = Gravity.CENTER })
+        }
+
     fun wordmark(ctx: Context): TextView =
         text(ctx, ctx.getString(R.string.app_name), 26f, R.color.ink, 2)
 
@@ -219,22 +289,35 @@ object RoopUi {
             gravity = Gravity.CENTER
             background = ctx.getDrawable(R.drawable.bg_dashed)
             isClickable = true
-            setPadding(dp(ctx, 12), dp(ctx, 20), dp(ctx, 12), dp(ctx, 20))
+            setPadding(dp(ctx, 12), dp(ctx, 11), dp(ctx, 12), dp(ctx, 11))
             layoutParams = margin(ctx, ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0)
 
             addView(FrameLayout(ctx).apply {
                 background = ctx.getDrawable(R.drawable.bg_pill_soft)
-                layoutParams = lp(dp(ctx, 46), dp(ctx, 46))
+                layoutParams = lp(dp(ctx, 42), dp(ctx, 42))
                 addView(iconView(ctx, iconRes, 22, R.color.blue).apply {
                     layoutParams = FrameLayout.LayoutParams(dp(ctx, 22), dp(ctx, 22)).apply {
                         gravity = Gravity.CENTER
                     }
                 })
+                // small blue + badge, bottom-right of the glyph tile
+                addView(FrameLayout(ctx).apply {
+                    background = ctx.getDrawable(R.drawable.bg_gradient_oval)
+                    layoutParams = FrameLayout.LayoutParams(dp(ctx, 17), dp(ctx, 17)).apply {
+                        gravity = Gravity.BOTTOM or Gravity.END
+                    }
+                    addView(text(ctx, "+", 12f, R.color.surface_solid, 2).apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ).apply { gravity = Gravity.CENTER }
+                    })
+                })
             })
             addView(text(ctx, line, 14.5f, R.color.ink, 1).apply {
                 layoutParams = margin(ctx, ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0, 2)
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 7, 0, 2)
             })
             addView(text(ctx, hint, 11.5f, R.color.ink_muted).apply {
                 gravity = Gravity.CENTER
@@ -268,13 +351,19 @@ object RoopUi {
         setPadding(dp(ctx, 4), dp(ctx, 4), dp(ctx, 4), dp(ctx, 4))
         options.forEachIndexed { index, label ->
             val active = index == selectedIndex
-            addView(TextView(ctx).apply {
-                text = label
-                textSize = 13.5f
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
-                typeface = medium()
+                if (active) {
+                    addView(iconView(ctx, R.drawable.ic_check, 12, R.color.surface_solid))
+                    addView(View(ctx).apply { layoutParams = lp(dp(ctx, 5), 1) })
+                }
+                addView(text(ctx, label, 13.5f,
+                    if (active) R.color.surface_solid else R.color.ink_secondary, 1))
+            }.apply {
+                gravity = Gravity.CENTER
                 setPadding(0, dp(ctx, 11), 0, dp(ctx, 11))
-                setTextColor(ctx.getColor(if (active) R.color.surface_solid else R.color.ink_secondary))
+                setPadding(0, dp(ctx, 11), 0, dp(ctx, 11))
                 background = if (active) ctx.getDrawable(R.drawable.bg_gradient_segment) else null
                 layoutParams = weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     if (index > 0) marginStart = dp(ctx, 4)
@@ -295,8 +384,8 @@ object RoopUi {
     ): LinearLayout = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
         background = ctx.getDrawable(R.drawable.bg_tile)
-        setPadding(dp(ctx, 11), dp(ctx, 11), dp(ctx, 11), dp(ctx, 11))
-        layoutParams = margin(ctx, dp(ctx, 108), ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 8, 0)
+        setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
+        layoutParams = margin(ctx, dp(ctx, 104), ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 8, 0)
         isClickable = true
         alpha = if (enabled) 1f else 0.55f
 
@@ -305,7 +394,7 @@ object RoopUi {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = margin(ctx, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0)
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 7, 0, 0)
             addView(text(ctx, name, 12.5f, R.color.ink, 1), weight(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(iconView(ctx, R.drawable.ic_chevron, 14, R.color.ink_muted))

@@ -187,13 +187,10 @@ class MainActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(12), dp(18), dp(4))
+            setPadding(dp(20), dp(12), dp(20), dp(4))
         }
 
-        row.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_mark)
-            layoutParams = RoopUi.lp(dp(46), dp(46))
-        })
+        row.addView(RoopUi.markTile(this))
 
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -247,7 +244,7 @@ class MainActivity : Activity() {
             background = getDrawable(R.drawable.bg_switcher)
             setPadding(dp(4), dp(4), dp(4), dp(4))
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(46), 18, 10, 18, 0)
+                dp(46), 20, 10, 20, 0)
         }
         val host = FrameLayout(this).apply {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
@@ -274,7 +271,7 @@ class MainActivity : Activity() {
                         .apply { if (index > 0) marginStart = dp(4) }
                     isClickable = true
                     contentDescription = label
-                    addView(RoopUi.iconView(this@MainActivity, iconFor(key), 18,
+                    addView(RoopUi.iconView(this@MainActivity, iconFor(key), 20,
                         if (active) R.color.surface_solid else R.color.ink_secondary))
                     addView(RoopUi.text(this@MainActivity, label, 14f,
                         if (active) R.color.surface_solid else R.color.ink_secondary, 1).apply {
@@ -322,7 +319,7 @@ class MainActivity : Activity() {
                 layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 isClickable = true
                 contentDescription = label
-                addView(RoopUi.iconView(this@MainActivity, icon, 22,
+                addView(RoopUi.iconView(this@MainActivity, icon, 24,
                     if (active) R.color.blue else R.color.ink_secondary))
                 addView(RoopUi.text(this@MainActivity, label, 11f,
                     if (active) R.color.blue else R.color.ink_secondary, if (active) 1 else 0)
@@ -345,7 +342,7 @@ class MainActivity : Activity() {
         renderSwitcher()
         renderNav()
         // Settings is not a peer of the work modes, so the switcher steps aside.
-        switcherRow.visibility = if (key == "settings") View.INVISIBLE else View.VISIBLE
+        switcherRow.visibility = if (key == "settings") View.GONE else View.VISIBLE
         when (key) {
             "history" -> renderHistory()
             "settings" -> renderSettings()
@@ -369,6 +366,7 @@ class MainActivity : Activity() {
         emptyIcon: Int,
         emptyLine: String,
         emptyHint: String,
+        support: String? = null,
         actions: List<Pair<Int, Pair<String, () -> Unit>>>,
         onTap: () -> Unit,
     ): Upload {
@@ -396,7 +394,7 @@ class MainActivity : Activity() {
         actions.forEach { (icon, spec) ->
             val (label, onClick) = spec
             header.addView(iconButton(icon, label, onClick).apply {
-                layoutParams = RoopUi.margin(this@MainActivity, dp(38), dp(38), 6, 0, 0, 0)
+                layoutParams = RoopUi.margin(this@MainActivity, dp(44), dp(44), 6, 0, 0, 0)
             })
         }
         card.addView(header)
@@ -410,6 +408,11 @@ class MainActivity : Activity() {
         }
         zone.addView(empty)
         card.addView(zone)
+        if (support != null) {
+            card.addView(RoopUi.text(this, support, 10.5f, R.color.ink_muted).apply {
+                setPadding(dp(2), dp(8), 0, 0)
+            })
+        }
         return Upload(card, zone, step)
     }
 
@@ -496,7 +499,9 @@ class MainActivity : Activity() {
             emptyLine = "Tap to upload target",
             emptyHint = "JPG \u00B7 PNG \u00B7 WebP \u00B7 GIF \u00B7 BMP \u00B7 TIFF \u00B7 AVIF\n" +
                 "MP4 \u00B7 MOV \u00B7 MKV \u00B7 WebM",
+            support = "Animated media is processed frame by frame",
             actions = listOf(
+                R.drawable.ic_camera to ("Take a photo" to { capture(REQ_CAM_TARGET) }),
                 R.drawable.ic_folder to ("Browse files" to {
                     pickMedia(REQ_TARGET, multiple = false, allowVideo = true)
                 }),
@@ -574,6 +579,17 @@ class MainActivity : Activity() {
             { pickMedia(REQ_TARGET, false, true) }) {
             targetFile = null; faces = null; mappings.clear(); refreshSwap()
         }
+        swapSource.card.findViewWithTag<View>("facesline")?.let { swapSource.card.removeView(it) }
+        val found = faces
+        if (found != null && found.source.size > 1) {
+            swapSource.card.addView(RoopUi.text(this,
+                "${found.source.size} faces found \u00B7 Choose face", 12f, R.color.blue, 1).apply {
+                tag = "facesline"
+                setPadding(dp(2), dp(8), 0, 0)
+                isClickable = true
+                setOnClickListener { faceMode = 2; refreshSwap() }
+            })
+        }
         renderSwapTiles()
         renderMapping()
         RoopUi.setPrimaryEnabled(swapCta, sourceFiles.isNotEmpty() && targetFile != null)
@@ -599,6 +615,12 @@ class MainActivity : Activity() {
             }
         })
         swapTiles.addView(RoopUi.optionTile(
+            this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false,
+        ))
+        swapTiles.addView(RoopUi.optionTile(
+            this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false,
+        ))
+        swapTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_shield, "Restore Details", if (restoreOn) "On" else "Off",
             enabled = models.enhancerInstalled,
         ).apply {
@@ -609,12 +631,6 @@ class MainActivity : Activity() {
                 }
             }
         })
-        swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false,
-        ))
-        swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false,
-        ))
         swapTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_person, "Faces",
             when (faceMode) { 0 -> "Largest"; 1 -> "All faces"; else -> "Manual" },
@@ -810,18 +826,10 @@ class MainActivity : Activity() {
             }
         })
         vidTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_shield, "Restore", if (restoreOn) "On" else "Off",
-            enabled = models.enhancerInstalled,
-        ).apply {
-            if (models.enhancerInstalled) setOnClickListener {
-                showSheet("Restore", listOf("Off", "On"), if (restoreOn) 1 else 0,
-                    listOf("Keep the raw swap.", "Restore detail on every frame (slower).")) { pick ->
-                    restoreOn = pick == 1; refreshVideo()
-                }
-            }
-        })
+            this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false,
+        ))
         vidTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_sliders, "Similarity", "Not available", enabled = false,
+            this, R.drawable.ic_shield, "Similarity", "Not available", enabled = false,
         ))
         vidTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false,
@@ -1149,6 +1157,86 @@ class MainActivity : Activity() {
         presentBottomSheet(dialog)
     }
 
+    /** Two cells side by side, 9dp apart (spec 8.5). */
+    private fun pairRow(left: View, right: View): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 9)
+            addView(left, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = dp(9) })
+            addView(right, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
+    /** `\u00B7 1080\u00D71920` when the dimensions can be read. */
+    private fun dimensionsSuffix(file: File): String {
+        val dims = try {
+            if (isVideo(file.name)) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(file.absolutePath)
+                    val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    if (w != null && h != null) "$w\u00D7$h" else ""
+                } finally {
+                    retriever.release()
+                }
+            } else {
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, options)
+                if (options.outWidth > 0) "${options.outWidth}\u00D7${options.outHeight}" else ""
+            }
+        } catch (_: Throwable) {
+            ""
+        }
+        return if (dims.isEmpty()) "" else " \u00B7 $dims"
+    }
+
+    /** Full-screen-ish preview of a finished file. */
+    private fun previewFile(file: File) {
+        val dialog = Dialog(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.bg_sheet)
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        box.addView(RoopUi.text(this, file.name, 16f, R.color.ink, 1).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        })
+        box.addView(RoopUi.meta(this, describe(file) + dimensionsSuffix(file)))
+        val holder = FrameLayout(this).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(340), 0, 12, 0, 0)
+            background = getDrawable(R.drawable.bg_thumb)
+            clipToOutline = true
+        }
+        if (isVideo(file.name)) {
+            holder.addView(VideoView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                setVideoPath(file.absolutePath)
+                setOnPreparedListener { player ->
+                    player.isLooping = true
+                    start()
+                }
+            })
+        } else {
+            holder.addView(ImageView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                loadThumb(file, this)
+            })
+        }
+        box.addView(holder)
+        box.addView(textButton("Close", R.color.ink_secondary) { dialog.dismiss() })
+        dialog.setContentView(box)
+        presentBottomSheet(dialog)
+    }
+
     private fun textButton(label: String, colorRes: Int, onClick: () -> Unit): TextView =
         RoopUi.text(this, label, 15f, colorRes, 1).apply {
             gravity = Gravity.CENTER
@@ -1223,18 +1311,26 @@ class MainActivity : Activity() {
         oCard.addView(RoopUi.sectionHeader(
             this, R.drawable.ic_sliders, "Swap Options", "Fine tune the result",
         ))
-        oCard.addView(RoopUi.settingRow(this, R.drawable.ic_shield, "Restore Details",
-            if (restoreOn) "On" else "Off") {
-            showSheet("Restore Details", listOf("Off", "On"), if (restoreOn) 1 else 0,
-                listOf("Keep the raw swap.", "Recover fine detail with the restore model.")) { pick ->
-                restoreOn = pick == 1; prefs.restore = restoreOn; renderSettings()
+        val restoreCell = RoopUi.settingCell(this, R.drawable.ic_shield, "Restore Details",
+            if (restoreOn) "On" else "Off").apply {
+            isClickable = true
+            setOnClickListener {
+                showSheet("Restore Details", listOf("Off", "On"), if (restoreOn) 1 else 0,
+                    listOf("Keep the raw swap.", "Recover fine detail with the restore model.")) { pick ->
+                    restoreOn = pick == 1; prefs.restore = restoreOn; renderSettings()
+                }
             }
-        })
-        oCard.addView(RoopUi.settingRow(this, R.drawable.ic_sliders, "Restore Strength",
-            "${(prefs.restoreStrength * 100).toInt()}%") { showStrengthSheet() })
-        oCard.addView(RoopUi.settingRow(this, R.drawable.ic_sliders, "Face Blend",
-            "Not available"))
-        oCard.addView(RoopUi.settingRow(this, R.drawable.ic_chip, "Color Match", "Not available"))
+        }
+        val strengthCell = RoopUi.settingCell(this, R.drawable.ic_sliders, "Restore Strength",
+            "${(prefs.restoreStrength * 100).toInt()}%").apply {
+            isClickable = true
+            setOnClickListener { showStrengthSheet() }
+        }
+        oCard.addView(pairRow(restoreCell, strengthCell))
+        oCard.addView(pairRow(
+            RoopUi.settingCell(this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false),
+            RoopUi.settingCell(this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false),
+        ))
         col.addView(oCard)
 
         // --- device
@@ -1303,10 +1399,19 @@ class MainActivity : Activity() {
         }
 
         deviceRow.removeAllViews()
-        deviceRow.addView(RoopUi.settingRow(this, R.drawable.ic_chip, "Processing Device",
-            "This Android device"))
-        deviceRow.addView(RoopUi.settingRow(this, R.drawable.ic_chip, "Model Acceleration",
-            "CPU"))
+        val strip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 8)
+        }
+        strip.addView(RoopUi.deviceCell(this, R.drawable.ic_chip, "Processing", "This device"),
+            RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(9) })
+        strip.addView(RoopUi.deviceCell(this, R.drawable.ic_chip, "Acceleration", "CPU"),
+            RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(9) })
+        strip.addView(RoopUi.deviceCell(this, R.drawable.ic_folder, "Models",
+            ModelManager.humanSize(models.totalBytes())),
+            RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        deviceRow.addView(strip)
         deviceRow.addView(RoopUi.meta(this,
             "No GPU backend is compiled into this build, so every model runs on the CPU. " +
                 "That is why a video can take minutes.")
@@ -1332,21 +1437,25 @@ class MainActivity : Activity() {
             val installed = models.isSwapperInstalled(file)
             val needsConverter = file == ModelManager.GHOST_2 &&
                 !models.isSwapperInstalled(ModelManager.GHOST_CONVERTER)
-            modelRow.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+            val card = FrameLayout(this).apply {
                 background = getDrawable(
                     if (selected) R.drawable.bg_tile_selected else R.drawable.bg_tile,
                 )
-                setPadding(dp(11), dp(11), dp(11), dp(11))
-                layoutParams = RoopUi.margin(this@MainActivity, dp(132),
+                layoutParams = RoopUi.margin(this@MainActivity, dp(120),
                     ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10, 0)
                 isClickable = true
+                contentDescription = "$label, ${if (installed) "installed" else "not downloaded"}"
                 RoopUi.pressScale(this)
+                setOnClickListener { showModelSheet(file, label) }
+            }
+            card.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(11), dp(11), dp(11), dp(11))
                 addView(FrameLayout(this@MainActivity).apply {
-                    background = getDrawable(R.drawable.bg_pill_soft)
-                    layoutParams = RoopUi.lp(dp(34), dp(34))
-                    addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_cube, 18, R.color.blue)
-                        .apply { layoutParams = FrameLayout.LayoutParams(dp(18), dp(18)).apply {
+                    background = getDrawable(R.drawable.bg_thumb)
+                    layoutParams = RoopUi.lp(dp(42), dp(42))
+                    addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_cube, 19, R.color.blue)
+                        .apply { layoutParams = FrameLayout.LayoutParams(dp(19), dp(19)).apply {
                             gravity = Gravity.CENTER } })
                 })
                 addView(RoopUi.text(this@MainActivity, label, 12f, R.color.ink, 1).apply {
@@ -1363,8 +1472,16 @@ class MainActivity : Activity() {
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                         0, 9, 0, 0)
                 })
-                setOnClickListener { showModelSheet(file, label) }
             })
+            if (selected) {
+                card.addView(RoopUi.checkBadge(this).apply {
+                    layoutParams = FrameLayout.LayoutParams(dp(18), dp(18)).apply {
+                        gravity = Gravity.TOP or Gravity.END
+                        marginEnd = dp(9); topMargin = dp(9)
+                    }
+                })
+            }
+            modelRow.addView(card)
         }
     }
 
@@ -1772,7 +1889,7 @@ class MainActivity : Activity() {
         header.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(RoopUi.text(this@MainActivity, "Result", 17f, R.color.ink, 1))
-            addView(RoopUi.meta(this@MainActivity, describe(file)))
+            addView(RoopUi.meta(this@MainActivity, describe(file) + dimensionsSuffix(file)))
         }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         header.addView(RoopUi.pill(this, "Completed", R.drawable.bg_pill_soft, R.color.success))
         card.addView(header)
@@ -1834,11 +1951,22 @@ class MainActivity : Activity() {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0)
         }
+        actions.addView(textButton("Preview", R.color.blue) { previewFile(file) },
+            RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         actions.addView(textButton("Save to Gallery", R.color.blue) {
             if (saveToGallery(file)) toast("Saved to Gallery") else toast("Could not save")
         }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         actions.addView(textButton("Share", R.color.blue) { share(file) },
             RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        actions.addView(textButton("More", R.color.ink_secondary) {
+            showSheet(file.name, listOf("Save to Gallery", "Share", "Open History"), -1, null) { pick ->
+                when (pick) {
+                    0 -> if (saveToGallery(file)) toast("Saved to Gallery") else toast("Could not save")
+                    1 -> share(file)
+                    else -> show("history")
+                }
+            }
+        }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         card.addView(actions)
         return card
     }
@@ -1881,15 +2009,19 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode in listOf(REQ_CAM_SOURCE, REQ_CAM_VSOURCE)) {
+        if (requestCode in listOf(REQ_CAM_SOURCE, REQ_CAM_VSOURCE, REQ_CAM_TARGET)) {
             val file = captureTarget
             captureTarget = null
             if (resultCode == RESULT_OK && file != null && file.isFile) {
-                if (requestCode == REQ_CAM_SOURCE) {
-                    sourceFiles.clear(); sourceFiles.add(file)
-                    faces = null; mappings.clear()
-                } else {
-                    vSources.clear(); vSources.add(file)
+                when (requestCode) {
+                    REQ_CAM_SOURCE -> {
+                        sourceFiles.clear(); sourceFiles.add(file)
+                        faces = null; mappings.clear()
+                    }
+                    REQ_CAM_TARGET -> {
+                        targetFile = file; faces = null; mappings.clear()
+                    }
+                    else -> { vSources.clear(); vSources.add(file) }
                 }
             }
             refreshSwap(); refreshVideo()
@@ -2088,7 +2220,9 @@ class MainActivity : Activity() {
 
     private fun pageColumn(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(18), dp(4), dp(18), dp(96))
+        // 20dp gutters (spec 2.2 for >=360dp) and the 20-26dp gap the switcher
+        // needs before the screen title.
+        setPadding(dp(20), dp(22), dp(20), dp(96))
     }
 
     private fun scrollPage(inner: View): ScrollView = ScrollView(this).apply {
@@ -2175,6 +2309,7 @@ class MainActivity : Activity() {
         const val REQ_VTARGET = 14
         const val REQ_CAM_SOURCE = 15
         const val REQ_CAM_VSOURCE = 16
+        const val REQ_CAM_TARGET = 18
         const val REQ_PERMISSION = 17
 
         val ENCODABLE_OUTPUT = setOf("jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp", "gif")
