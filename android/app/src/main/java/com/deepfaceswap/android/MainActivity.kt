@@ -1390,6 +1390,32 @@ class MainActivity : Activity() {
         modelCard.addView(RoopUi.hScroll(this, modelRow))
         col.addView(modelCard)
 
+        // The complete inventory: every model the engine can use, not just the
+        // swappers. Mirrors the original CHECK / DOWNLOAD MODELS readout.
+        val inventoryCard = RoopUi.card(this)
+        inventoryCard.addView(RoopUi.sectionHeader(
+            this, R.drawable.ic_cube, "All models",
+            "Everything the engine can use, and what is on this device",
+        ))
+        val all = models.models()
+        val installedCount = all.count { it.installed }
+        inventoryCard.addView(RoopUi.text(this,
+            "Engine $appVersion()  \u00B7  Present: $installedCount/${all.size}  \u00B7  " +
+                ModelManager.humanSize(models.totalBytes()) + " on disk",
+            12f, R.color.ink_secondary, 1).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 10)
+        })
+        inventoryCard.addView(RoopUi.text(this,
+            "Detector, recogniser and landmarker are required for any swap. Swappers and the " +
+                "restorer are optional.",
+            11.5f, R.color.ink_muted).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 10)
+        })
+        for (model in all) inventoryCard.addView(inventoryRow(model))
+        col.addView(inventoryCard)
+
         // --- quality
         val qCard = RoopUi.card(this)
         qCard.addView(RoopUi.sectionHeader(
@@ -1580,6 +1606,86 @@ class MainActivity : Activity() {
                 })
             }
             modelRow.addView(card)
+        }
+    }
+
+    /** One line per model: what it is, its size and licence, and its state. */
+    private fun inventoryRow(model: ModelManager.Model): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = getDrawable(R.drawable.bg_card_inner)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 8)
+            isClickable = true
+            contentDescription = "${model.title}, " +
+                (if (model.installed) "installed" else "not downloaded")
+            setOnClickListener { showInventorySheet(model) }
+            RoopUi.pressScale(this)
+        }
+        row.addView(RoopUi.softTile(this, iconForModel(model.title), R.color.blue))
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = RoopUi.margin(this@MainActivity, 0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 10, 0, 8, 0)
+            addView(RoopUi.text(this@MainActivity, model.title, 13.5f, R.color.ink, 1).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            addView(RoopUi.meta(this@MainActivity,
+                "${model.fileName} \u00B7 ${model.approxSize} \u00B7 ${model.licence}"))
+        }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        when {
+            model.installed ->
+                row.addView(RoopUi.pill(this, "Installed", R.drawable.bg_pill_soft, R.color.success))
+            model.required ->
+                row.addView(RoopUi.pill(this, "Required", R.drawable.bg_pill_lavender, R.color.violet))
+            else ->
+                row.addView(RoopUi.pill(this, "Download", R.drawable.bg_pill_lavender, R.color.violet))
+        }
+        return row
+    }
+
+    private fun iconForModel(title: String): Int = when {
+        title.startsWith("Face detector") -> R.drawable.ic_scan
+        title.startsWith("Face recogniser") -> R.drawable.ic_person
+        title.startsWith("Face landmarker") -> R.drawable.ic_person
+        title.startsWith("Converter") -> R.drawable.ic_sliders
+        title.startsWith("Enhancer") -> R.drawable.ic_hd
+        title.startsWith("Emap") -> R.drawable.ic_cube
+        else -> R.drawable.ic_cube
+    }
+
+    private fun showInventorySheet(model: ModelManager.Model) {
+        val actions = mutableListOf<String>()
+        if (!model.installed) actions.add("Download")
+        if (model.installed && !model.required) actions.add("Remove")
+        actions.add("Details")
+
+        showSheet(model.title, actions, -1, actions.map { action ->
+            when (action) {
+                "Download" -> "About ${model.approxSize} \u00B7 ${model.licence}"
+                "Remove" -> "Deletes the downloaded weights from this device."
+                else -> if (model.required) {
+                    "Required for every swap."
+                } else {
+                    "Optional — the engine runs without it."
+                }
+            }
+        }) { pick ->
+            when (actions[pick]) {
+                "Download" -> downloadModel(model)
+                "Remove" -> {
+                    runCatching { File(model.file.absolutePath).delete() }
+                    renderSettings()
+                }
+                else -> toast(
+                    "${model.fileName} \u00B7 ${model.approxSize} \u00B7 ${model.licence} \u00B7 " +
+                        if (model.installed) "installed" else "not downloaded",
+                )
+            }
         }
     }
 
