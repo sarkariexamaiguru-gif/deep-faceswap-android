@@ -94,7 +94,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
     let opts = SwapOptions {
         use_mouth_mask: mouth_mask,
         use_multi_face: multi_face,
-        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST) as u32,
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
     };
 
@@ -270,7 +270,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImageMappe
     let opts = SwapOptions {
         use_mouth_mask: use_mouth_mask != 0,
         use_multi_face: true,
-        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST) as u32,
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
     };
 
