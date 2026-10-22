@@ -122,6 +122,9 @@ class MainActivity : Activity() {
 
     // Settings UI
     private lateinit var modelRow: LinearLayout
+    private lateinit var downloadCard: LinearLayout
+    private var activeDownload: String? = null
+    private var lastProgress: ModelManager.Progress? = null
     private lateinit var qualitySegmentHost: LinearLayout
     private lateinit var qualityHint: TextView
     private lateinit var deviceRow: LinearLayout
@@ -1391,6 +1394,9 @@ class MainActivity : Activity() {
         modelCard.addView(RoopUi.hScroll(this, modelRow))
         col.addView(modelCard)
 
+        downloadCard = RoopUi.card(this).apply { visibility = View.GONE }
+        col.addView(downloadCard)
+
         // The complete inventory: every model the engine can use, not just the
         // swappers. Mirrors the original CHECK / DOWNLOAD MODELS readout.
         val inventoryCard = RoopUi.card(this)
@@ -1634,14 +1640,21 @@ class MainActivity : Activity() {
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })
-            addView(RoopUi.meta(this@MainActivity,
-                "${model.fileName} \u00B7 ${model.approxSize} \u00B7 ${model.licence}"))
+            val partial = models.isPartial(model.fileName)
+            addView(RoopUi.meta(this@MainActivity, if (partial) {
+                "${model.fileName} \u00B7 ${ModelManager.humanSize(models.bytesOnDisk(model.fileName))}" +
+                    " of ${model.approxSize} downloaded"
+            } else {
+                "${model.fileName} \u00B7 ${model.approxSize} \u00B7 ${model.licence}"
+            }))
         }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             .apply { marginStart = dp(10) })
 
         when {
             model.installed ->
                 row.addView(RoopUi.pill(this, "Installed", R.drawable.bg_pill_soft, R.color.success))
+            models.isPartial(model.fileName) ->
+                row.addView(RoopUi.pill(this, "Resume", R.drawable.bg_pill_lavender, R.color.violet))
             model.required ->
                 row.addView(RoopUi.pill(this, "Required", R.drawable.bg_pill_lavender, R.color.violet))
             else ->
@@ -1661,14 +1674,20 @@ class MainActivity : Activity() {
     }
 
     private fun showInventorySheet(model: ModelManager.Model) {
+        val partial = models.isPartial(model.fileName)
         val actions = mutableListOf<String>()
-        if (!model.installed) actions.add("Download")
+        if (!model.installed) actions.add(if (partial) "Resume download" else "Download")
+        if (partial) actions.add("Discard partial download")
         if (model.installed && !model.required) actions.add("Remove")
         actions.add("Details")
 
         showSheet(model.title, actions, -1, actions.map { action ->
             when (action) {
                 "Download" -> "About ${model.approxSize} \u00B7 ${model.licence}"
+                "Resume download" ->
+                    "Continues from ${ModelManager.humanSize(models.bytesOnDisk(model.fileName))}" +
+                        " of ${model.approxSize}."
+                "Discard partial download" -> "Deletes the part-downloaded file."
                 "Remove" -> "Deletes the downloaded weights from this device."
                 else -> if (model.required) {
                     "Required for every swap."
@@ -1678,7 +1697,11 @@ class MainActivity : Activity() {
             }
         }) { pick ->
             when (actions[pick]) {
-                "Download" -> downloadModel(model)
+                "Download", "Resume download" -> downloadModel(model)
+                "Discard partial download" -> {
+                    models.discardPartial(model.fileName)
+                    renderSettings()
+                }
                 "Remove" -> {
                     runCatching { File(model.file.absolutePath).delete() }
                     renderSettings()
@@ -1710,7 +1733,11 @@ class MainActivity : Activity() {
         val installed = models.isSwapperInstalled(file)
         val option = models.models().firstOrNull { it.fileName == file }
         val actions = mutableListOf<String>()
-        if (!installed) actions.add("Download") else actions.add("Use Model")
+        if (!installed) {
+            actions.add(if (models.isPartial(file)) "Resume download" else "Download")
+        } else {
+            actions.add("Use Model")
+        }
         if (installed && file != ModelManager.INSWAPPER_FILE) actions.add("Remove")
         actions.add("Details")
 
@@ -1724,12 +1751,14 @@ class MainActivity : Activity() {
             }
         }) { pick ->
             when (actions[pick]) {
-                "Download" -> {
-                    if (option != null) downloadModel(option)
+                "Download", "Resume download" -> {
+                    val queue = mutableListOf<ModelManager.Model>()
+                    option?.let { queue.add(it) }
                     if (file == ModelManager.GHOST_2) {
                         models.models().firstOrNull { it.fileName == ModelManager.GHOST_CONVERTER }
-                            ?.let { downloadModel(it) }
+                            ?.let { queue.add(it) }
                     }
+                    downloadModels(queue)
                 }
                 "Use Model" -> { swapperFile = file; prefs.modelFile = file; renderSettings() }
                 "Remove" -> {
@@ -1835,17 +1864,114 @@ class MainActivity : Activity() {
     private fun cacheDirSize(): Long =
         cacheDir.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
 
-    private fun downloadModel(model: ModelManager.Model) {
-        toast("Downloading ${model.fileName}\u2026")
+    private fun downloadModel(model: ModelManager.Model) = downloadModels(listOf(model))
+
+    /**
+     * Runs a queue of transfers on a background thread, publishing live bytes to
+     * the progress card. A failure keeps whatever was downloaded, so tapping
+     * again resumes instead of starting over.
+     */
+    private fun downloadModels(queue: List<ModelManager.Model>) {
+        if (queue.isEmpty()) return
+        if (activeDownload != null) {
+            toast("A download is already running")
+            return
+        }
+        activeDownload = queue.first().title
+        lastProgress = ModelManager.Progress(
+            queue.first().title,
+            models.bytesOnDisk(queue.first().fileName),
+            queue.first().expectedBytes,
+            resuming = models.isPartial(queue.first().fileName),
+        )
+        renderDownload()
+
         Thread {
-            val message = try {
-                models.download(model) { }
-                "${model.fileName} installed."
-            } catch (e: Throwable) {
-                "Download failed: ${e.message}"
+            var failure: String? = null
+            var failedModel: ModelManager.Model? = null
+            for (model in queue) {
+                io.post {
+                    activeDownload = model.title
+                    lastProgress = ModelManager.Progress(
+                        model.title,
+                        models.bytesOnDisk(model.fileName),
+                        model.expectedBytes,
+                        resuming = models.isPartial(model.fileName),
+                    )
+                    renderDownload()
+                }
+                try {
+                    models.download(model) { pr -> io.post { lastProgress = pr; renderDownload() } }
+                } catch (e: Throwable) {
+                    failure = e.message ?: "download failed"
+                    failedModel = model
+                    break
+                }
             }
-            io.post { renderSettings(); toast(message) }
+            val f = failure
+            val fm = failedModel
+            io.post {
+                activeDownload = null
+                if (f == null) {
+                    lastProgress = null
+                    renderDownload()
+                    renderSettings()
+                    toast("Installed")
+                } else {
+                    val kept = fm?.let { models.bytesOnDisk(it.fileName) } ?: 0L
+                    lastProgress = ModelManager.Progress(
+                        fm?.title ?: "Download", kept, fm?.expectedBytes ?: 0L, failed = f,
+                    )
+                    renderDownload()
+                    renderSettings()
+                    toast("Stopped at ${ModelManager.humanSize(kept)} \u2014 tap Resume to continue")
+                }
+            }
         }.start()
+    }
+
+    /** The live download card: real bytes, a real bar, and a resume note. */
+    private fun renderDownload() {
+        downloadCard.removeAllViews()
+        val pr = lastProgress
+        if (pr == null) {
+            downloadCard.visibility = View.GONE
+            return
+        }
+        downloadCard.visibility = View.VISIBLE
+        downloadCard.addView(RoopUi.sectionHeader(
+            this, R.drawable.ic_download,
+            if (pr.finished) "Installed" else if (pr.failed != null) "Download stopped" else "Downloading",
+            pr.label,
+        ))
+        downloadCard.addView(RoopUi.text(
+            this,
+            pr.text + if (pr.percent >= 0) "   \u00B7   ${pr.percent}%" else "",
+            15f, R.color.ink, 1,
+        ))
+        if (pr.resuming && pr.failed == null && !pr.finished) {
+            downloadCard.addView(RoopUi.meta(this, "Resumed from where it stopped."))
+        }
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            isIndeterminate = pr.fraction < 0f
+            progress = if (pr.fraction >= 0f) (pr.fraction * 1000f).toInt() else 0
+            progressTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.blue))
+            progressBackgroundTintList =
+                android.content.res.ColorStateList.valueOf(getColor(R.color.border_cool))
+            layoutParams = RoopUi.margin(this@MainActivity,
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(8), 0, 12, 0, 0)
+        }
+        downloadCard.addView(bar)
+        if (pr.failed != null) {
+            downloadCard.addView(RoopUi.meta(this,
+                "${pr.failed} \u2014 the part-downloaded file is kept. Tap Resume to carry on."))
+        } else if (pr.finished) {
+            downloadCard.addView(RoopUi.meta(this, "Ready to use."))
+        } else {
+            downloadCard.addView(RoopUi.meta(this,
+                "Safe to stop: a later attempt continues from here."))
+        }
     }
 
     // -------------------------------------------------------------- flows

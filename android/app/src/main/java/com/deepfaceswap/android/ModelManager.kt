@@ -68,6 +68,9 @@ class ModelManager(private val context: Context) {
         val file: File get() = File(dir, fileName)
         val installed: Boolean get() = file.isFile && file.length() > 0L
         val bytes: Long get() = if (installed) file.length() else 0L
+
+        /** The advertised download size, parsed to bytes (0 when unknown). */
+        val expectedBytes: Long get() = ModelManager.parseSize(approxSize)
     }
 
     fun models(): List<Model> = listOf(
@@ -106,6 +109,27 @@ class ModelManager(private val context: Context) {
     fun swapperPath(fileName: String): String = File(modelsDir, fileName).absolutePath
 
     /** Whether a swapper has been downloaded. */
+    /** Bytes already on disk, counting an unfinished download. */
+    fun bytesOnDisk(fileName: String): Long {
+        val full = File(modelsDir, fileName)
+        if (full.isFile && full.length() > 0L) return full.length()
+        val part = File(modelsDir, "$fileName.part")
+        return if (part.isFile) part.length() else 0L
+    }
+
+    /** True when a download was started but never finished. */
+    fun isPartial(fileName: String): Boolean {
+        val full = File(modelsDir, fileName)
+        if (full.isFile && full.length() > 0L) return false
+        val part = File(modelsDir, "$fileName.part")
+        return part.isFile && part.length() > 0L
+    }
+
+    /** Throw away an unfinished download so the next attempt starts clean. */
+    fun discardPartial(fileName: String) {
+        runCatching { File(modelsDir, "$fileName.part").delete() }
+    }
+
     fun isSwapperInstalled(fileName: String): Boolean =
         File(modelsDir, fileName).let { it.isFile && it.length() > 0L }
 
@@ -146,39 +170,70 @@ class ModelManager(private val context: Context) {
     // ------------------------------------------------------------ downloads --
 
     /** Download a single model. Buffalo members pull the shared archive once. */
-    fun download(model: Model, progress: (String) -> Unit) {
+    /**
+     * Live state of a model transfer.
+     *
+     * [bytesTotal] is -1 when the server does not advertise a length, in which
+     * case the UI shows a plain byte count rather than inventing a percentage.
+     */
+    data class Progress(
+        val label: String,
+        val bytesDone: Long,
+        val bytesTotal: Long,
+        val resuming: Boolean = false,
+        val finished: Boolean = false,
+        val failed: String? = null,
+    ) {
+        val fraction: Float
+            get() = if (bytesTotal > 0L) (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f) else -1f
+
+        val percent: Int get() = if (fraction < 0f) -1 else (fraction * 100f).toInt()
+
+        /** `142.0 MB / 705.0 MB`, or just the count when the total is unknown. */
+        val text: String
+            get() = if (bytesTotal > 0L) {
+                "${ModelManager.humanSize(bytesDone)} / ${ModelManager.humanSize(bytesTotal)}"
+            } else {
+                ModelManager.humanSize(bytesDone)
+            }
+    }
+
+    fun download(model: Model, progress: (Progress) -> Unit) {
         ensureDirs()
         when (model.source) {
             Source.BUFFALO_ZIP -> {
-                progress("Downloading buffalo_l.zip …")
-                downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, progress)
+                val expected = models()
+                    .filter { it.source == Source.BUFFALO_ZIP }
+                    .sumOf { it.expectedBytes }
+                downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, "buffalo_l",
+                    expected, progress)
             }
             Source.ASSET -> {
-                progress("Installing ${model.fileName} from the APK …")
+                progress(Progress(model.title, 0L, 0L))
                 if (!copyEmapFromAssetsIfPresent()) {
                     throw IllegalStateException("emap asset missing from the APK")
                 }
+                progress(Progress(model.title, 0L, 0L, finished = true))
             }
             Source.URL -> {
                 val url = model.url
                     ?: throw IllegalStateException("no download URL for ${model.fileName}")
-                val size = if (model.approxSize.isNotEmpty()) " (${model.approxSize})" else ""
-                progress("Downloading ${model.fileName}$size …")
-                downloadFile(url, model.file, progress)
+                downloadFile(url, model.file, model.title, progress)
             }
         }
     }
 
     /** Fetch everything that can be fetched automatically. Returns a log summary. */
-    fun downloadAll(progress: (String) -> Unit): String {
+    fun downloadAll(progress: (Progress) -> Unit): String {
         ensureDirs()
         val log = StringBuilder()
 
         val buffaloMissing = models().filter { it.source == Source.BUFFALO_ZIP && !it.installed }
         if (buffaloMissing.isNotEmpty()) {
-            progress("Downloading buffalo_l.zip …")
             try {
-                downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, progress)
+                downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, "buffalo_l",
+                    models().filter { it.source == Source.BUFFALO_ZIP }.sumOf { it.expectedBytes },
+                    progress)
                 log.append("buffalo_l models installed.\n")
             } catch (e: Exception) {
                 log.append("buffalo_l download failed: ${e.message}\n")
@@ -188,9 +243,8 @@ class ModelManager(private val context: Context) {
         models()
             .filter { it.source == Source.URL && it.required && !it.installed }
             .forEach { model ->
-                progress("Downloading ${model.fileName} (${model.approxSize}) …")
                 try {
-                    downloadFile(model.url!!, model.file, progress)
+                    downloadFile(model.url!!, model.file, model.title, progress)
                     log.append("${model.fileName} installed.\n")
                 } catch (e: Exception) {
                     log.append("${model.fileName} download failed: ${e.message}\n")
@@ -231,77 +285,123 @@ class ModelManager(private val context: Context) {
 
     // -------------------------------------------------------------- plumbing --
 
-    private fun downloadFile(url: String, target: File, progress: (String) -> Unit) {
-        val conn = open(url)
-        conn.inputStream.use { input ->
-            target.parentFile?.mkdirs()
-            // Write to a temp file first so an interrupted download never leaves
-            // a truncated model that looks installed.
-            val temp = File(target.parentFile, "${target.name}.part")
-            FileOutputStream(temp).use { output ->
-                val buf = ByteArray(1 shl 16)
-                var total = 0L
-                var last = 0L
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    output.write(buf, 0, n)
-                    total += n
-                    if (total - last > (8L shl 20)) {
-                        progress("  … ${humanSize(total)}")
-                        last = total
+    private fun downloadFile(
+        url: String,
+        target: File,
+        label: String,
+        progress: (Progress) -> Unit,
+    ) {
+        target.parentFile?.mkdirs()
+        // Keep the partial file between attempts so a dropped connection can be
+        // resumed instead of restarted.
+        val temp = File(target.parentFile, "${target.name}.part")
+        var done = if (temp.isFile) temp.length() else 0L
+
+        val conn = open(url, if (done > 0L) done else null)
+        try {
+            val code = conn.responseCode
+            // 206 means the server honoured the Range; anything else means start over.
+            val resuming = done > 0L && code == HttpURLConnection.HTTP_PARTIAL
+            if (done > 0L && !resuming) {
+                temp.delete()
+                done = 0L
+            }
+            val length = conn.contentLengthLong
+            val total = if (resuming && length > 0L) done + length else length
+            progress(Progress(label, done, total, resuming = resuming))
+
+            conn.inputStream.use { input ->
+                FileOutputStream(temp, resuming).use { output ->
+                    val buf = ByteArray(1 shl 16)
+                    var sinceReport = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        output.write(buf, 0, n)
+                        done += n
+                        sinceReport += n
+                        if (sinceReport >= (1L shl 20)) {
+                            progress(Progress(label, done, total, resuming = resuming))
+                            sinceReport = 0L
+                        }
                     }
                 }
             }
+
             if (temp.length() <= 0L) {
                 temp.delete()
                 throw IllegalStateException("downloaded file is empty")
+            }
+            // A short read means the socket dropped mid-file. Leave the .part in
+            // place so the next tap continues from here.
+            if (total > 0L && temp.length() < total) {
+                throw IllegalStateException(
+                    "stopped at ${humanSize(temp.length())} of ${humanSize(total)}",
+                )
             }
             if (target.exists()) target.delete()
             if (!temp.renameTo(target)) {
                 temp.copyTo(target, overwrite = true)
                 temp.delete()
             }
+            progress(Progress(label, done, total, finished = true))
+        } finally {
+            conn.disconnect()
         }
-        conn.disconnect()
     }
 
-    private fun downloadZip(url: String, destDir: File, wanted: Set<String>, progress: (String) -> Unit) {
+    private fun downloadZip(
+        url: String,
+        destDir: File,
+        wanted: Set<String>,
+        label: String,
+        expectedTotal: Long,
+        progress: (Progress) -> Unit,
+    ) {
         val conn = open(url)
-        destDir.mkdirs()
-        var total = 0L
-        var last = 0L
-        ZipInputStream(conn.inputStream.buffered()).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                val name = File(entry.name).name
-                if (name in wanted) {
-                    FileOutputStream(File(destDir, name)).use { out ->
-                        val buf = ByteArray(1 shl 16)
-                        while (true) {
-                            val n = zip.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            total += n
-                            if (total - last > (8L shl 20)) {
-                                progress("  … ${humanSize(total)}")
-                                last = total
+        try {
+            destDir.mkdirs()
+            var done = 0L
+            var sinceReport = 0L
+            progress(Progress(label, 0L, expectedTotal))
+            ZipInputStream(conn.inputStream.buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val name = File(entry.name).name
+                    if (name in wanted) {
+                        FileOutputStream(File(destDir, name)).use { out ->
+                            val buf = ByteArray(1 shl 16)
+                            while (true) {
+                                val n = zip.read(buf)
+                                if (n < 0) break
+                                out.write(buf, 0, n)
+                                done += n
+                                sinceReport += n
+                                if (sinceReport >= (1L shl 20)) {
+                                    progress(Progress(label, done, expectedTotal))
+                                    sinceReport = 0L
+                                }
                             }
                         }
                     }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
                 }
-                zip.closeEntry()
-                entry = zip.nextEntry
             }
+            progress(Progress(label, done, expectedTotal, finished = true))
+        } finally {
+            conn.disconnect()
         }
-        conn.disconnect()
     }
 
-    private fun open(url: String): HttpURLConnection =
+    private fun open(url: String, from: Long? = null): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 30_000
-            readTimeout = 120_000
+            // Generous: these files run to hundreds of megabytes.
+            readTimeout = 180_000
             instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Roop-Android")
+            if (from != null && from > 0L) setRequestProperty("Range", "bytes=$from-")
         }
 
     companion object {
@@ -331,6 +431,19 @@ class ModelManager(private val context: Context) {
             "https://huggingface.co/facefusion/models-3.0.0/resolve/main/uniface_256.onnx"
 
         private val BUFFALO_ENTRIES = setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx")
+
+        /** Parse `705 MB` / `1.2 GB` back into bytes; 0 when it cannot. */
+        fun parseSize(text: String): Long {
+            val t = text.trim().uppercase()
+            if (t.isEmpty()) return 0L
+            val number = t.takeWhile { it.isDigit() || it == '.' }.toDoubleOrNull() ?: return 0L
+            return when {
+                t.contains("GB") -> (number * 1_073_741_824.0).toLong()
+                t.contains("MB") -> (number * 1_048_576.0).toLong()
+                t.contains("KB") -> (number * 1024.0).toLong()
+                else -> 0L
+            }
+        }
 
         fun humanSize(bytes: Long): String {
             if (bytes <= 0L) return "0.0 MB"
