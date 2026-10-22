@@ -64,13 +64,14 @@ object RoopUi {
         }
     }
 
-    /** The app mark: a gradient disc carrying Roop's face. */
+    /** The app mark: the Roop emblem. */
     fun markTile(ctx: Context): FrameLayout = FrameLayout(ctx).apply {
-        background = ctx.getDrawable(R.drawable.bg_gradient_oval)
         elevation = dp(ctx, 3).toFloat()
-        layoutParams = lp(dp(ctx, 46), dp(ctx, 46))
+        layoutParams = lp(dp(ctx, 46), dp(46))
         addView(ImageView(ctx).apply {
-            setImageResource(R.drawable.ic_mark_face)
+            setImageResource(R.drawable.roop_logo)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = ctx.getString(R.string.app_name)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
             )

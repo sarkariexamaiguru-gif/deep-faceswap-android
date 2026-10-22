@@ -1,14 +1,9 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Roop's face, centred in the adaptive safe zone -->
-    <path android:pathData="M44,49h0.01M64,49h0.01"
-        android:strokeColor="#FFFFFF" android:strokeWidth="6.5"
-        android:strokeLineCap="round" android:fillColor="#00000000" />
-    <path android:pathData="M41,62c3.2,6.6 7.6,9.9 13,9.9s9.8,-3.3 13,-9.9"
-        android:strokeColor="#FFFFFF" android:strokeWidth="5.4"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:fillColor="#00000000" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Roop emblem, centred inside the adaptive safe zone. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:drawable="@drawable/roop_logo"
+        android:gravity="center"
+        android:width="74dp"
+        android:height="74dp" />
+</layer-list>
