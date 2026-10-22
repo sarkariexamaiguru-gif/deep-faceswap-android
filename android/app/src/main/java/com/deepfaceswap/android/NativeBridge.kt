@@ -157,7 +157,6 @@ object NativeBridge {
     } catch (e: Exception) {
         SwapResult(ok = false, error = "Malformed native response: $json")
     }
-}
 
     /**
      * Detect faces in the source(s) and target for the manual mapping UI.
@@ -229,3 +228,4 @@ object NativeBridge {
         )
         return parse(json)
     }
+}
