@@ -301,9 +301,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             background = getDrawable(R.drawable.bg_nav)
             elevation = dp(6).toFloat()
-            setPadding(dp(6), dp(8), dp(6), dp(8))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(64), 14, 0, 14, 0)
+                dp(70), 14, 0, 14, 0)
         }
         host.addView(navRow)
         renderNav()
@@ -324,7 +324,6 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 background = if (active) getDrawable(R.drawable.bg_pill_soft) else null
-                setPadding(0, dp(8), 0, dp(8))
                 layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 isClickable = true
                 contentDescription = label

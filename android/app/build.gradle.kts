@@ -13,8 +13,8 @@ android {
         applicationId = "com.deepfaceswap.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 15
-        versionName = "1.2.0"
+        versionCode = 16
+        versionName = "1.2.1"
 
         // The `ort` crate ships a prebuilt ONNX Runtime only for 64-bit ARM
         // Android, so we target arm64-v8a exclusively.
