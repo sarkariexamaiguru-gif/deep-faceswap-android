@@ -13,8 +13,8 @@ android {
         applicationId = "com.deepfaceswap.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         // The `ort` crate ships a prebuilt ONNX Runtime only for 64-bit ARM
         // Android, so we target arm64-v8a exclusively.
@@ -23,13 +23,38 @@ android {
         }
     }
 
+    // A single, stable signing identity so new builds install as *updates* over
+    // the installed app instead of requiring an uninstall. Credentials are read
+    // from the environment (CI secrets) — never hardcoded here.
+    signingConfigs {
+        create("release") {
+            val storePath = System.getenv("SIGNING_STORE_FILE")
+            if (storePath != null && file(storePath).exists()) {
+                storeFile = file(storePath)
+                storeType = "PKCS12"
+                storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
+    // Use the shared identity for both variants when it is available; otherwise
+    // fall back to the standard debug key so local builds still work.
+    val sharedSigning = signingConfigs.getByName("release")
+    val signingAvailable = System.getenv("SIGNING_STORE_FILE")?.let { file(it).exists() } == true
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = if (signingAvailable) sharedSigning else signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        debug {
+            if (signingAvailable) signingConfig = sharedSigning
         }
     }
 

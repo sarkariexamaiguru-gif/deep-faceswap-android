@@ -100,8 +100,46 @@ native library.
 ### In CI
 
 Push to `main` (or run the **Build APK** workflow manually) — GitHub Actions
-installs the JDK, SDK, NDK, Rust and `cargo-ndk`, then uploads `app-debug.apk`
-as a build artifact.
+installs the JDK, SDK, NDK, Rust and `cargo-ndk`, then uploads the signed
+`app-release.apk` as a build artifact.
+
+---
+
+## Signing & updates
+
+Builds are signed with a single, stable key so a new APK installs **over** the
+previous one (`adb install -r`) instead of requiring an uninstall first. That
+only works if every build uses the *same* signing identity — Android rejects an
+update signed with a different key.
+
+The key is a PKCS12 keystore and its credentials are **not** in this repository.
+They live in GitHub Actions secrets:
+
+| Secret | Meaning |
+|---|---|
+| `KEYSTORE_BASE64` | the keystore file, base64-encoded |
+| `KEYSTORE_PASSWORD` | keystore password |
+| `KEY_ALIAS` | key alias (`deepfaceswap`) |
+| `KEY_PASSWORD` | key password |
+
+`app/build.gradle.kts` reads them from the environment (`SIGNING_STORE_FILE`,
+`SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`). When
+they are absent — a fork, or a local build — it falls back to the debug key so
+the build still succeeds.
+
+To sign locally, decode the keystore and point Gradle at it:
+
+```bash
+echo "$KEYSTORE_BASE64" | base64 -d > release.p12
+export SIGNING_STORE_FILE=$PWD/release.p12
+export SIGNING_STORE_PASSWORD='…' SIGNING_KEY_ALIAS=deepfaceswap SIGNING_KEY_PASSWORD='…'
+cd android && ./gradlew assembleRelease
+```
+
+> **Keep the keystore and its passwords safe.** If you lose them you cannot
+> update an installed app — you would have to uninstall and start over with a
+> new identity. Anyone who has the keystore can sign APKs that Android will
+> treat as your app.
 
 ---
 
