@@ -1,23 +1,32 @@
 package com.deepfaceswap.android
 
+import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
@@ -27,10 +36,10 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Dark, card-based UI with a bottom navigation bar: Swap / Live / Settings.
+ * Dark, card-based UI: bottom navigation (Swap / Live / Settings), sub-tabs and
+ * per-model rows in Settings, and toggle rows for the swap options.
  *
- * Only framework widgets are used (no AndroidX), so the build stays
- * dependency-free.
+ * Framework widgets only — no AndroidX — so the build stays dependency-free.
  */
 class MainActivity : Activity() {
 
@@ -43,30 +52,45 @@ class MainActivity : Activity() {
     private val sourceFiles = mutableListOf<File>()
     private var targetFile: File? = null
 
+    private var pendingCaptureUri: Uri? = null
+    private var pendingCameraIsSource = true
+    private var pendingAfterPermission: (() -> Unit)? = null
+
+    // chrome
     private lateinit var content: FrameLayout
     private val tabs = mutableListOf<View>()
     private val navItems = mutableListOf<LinearLayout>()
     private val navIcons = mutableListOf<ImageView>()
     private val navLabels = mutableListOf<TextView>()
 
-    // Swap tab
+    // swap tab
     private lateinit var sourcePreview: ImageView
     private lateinit var sourceHint: View
     private lateinit var sourceCaption: TextView
     private lateinit var targetPreview: ImageView
     private lateinit var targetHint: View
     private lateinit var targetCaption: TextView
-    private lateinit var mouthMask: CheckBox
-    private lateinit var multiFace: CheckBox
+    private lateinit var mouthMask: Switch
+    private lateinit var multiFace: Switch
     private lateinit var startButton: Button
     private lateinit var progress: ProgressBar
     private lateinit var resultPreview: ImageView
     private lateinit var logView: TextView
 
-    // Settings tab
-    private lateinit var modelsStatus: TextView
+    // settings tab
+    private val subtabLabels = mutableListOf<TextView>()
+    private val subtabIndicators = mutableListOf<View>()
+    private val subtabPages = mutableListOf<View>()
+    private lateinit var modelsRows: LinearLayout
+    private lateinit var modelsSummary: TextView
+    private lateinit var deviceRows: LinearLayout
 
-    private class Picker(val box: FrameLayout, val preview: ImageView, val hint: View)
+    private class Picker(
+        val card: View,
+        val box: FrameLayout,
+        val preview: ImageView,
+        val hint: View,
+    )
 
     // ------------------------------------------------------------------ setup --
 
@@ -74,9 +98,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(buildRoot())
         selectTab(0)
-        log("Engine ${NativeBridge.version()} · arm64-v8a")
+        selectSubTab(0)
         models.copyEmapFromAssetsIfPresent()
-        refreshModels()
+        renderModels()
+        renderDevice()
+        log("Engine ${NativeBridge.version()} · arm64-v8a")
     }
 
     private fun buildRoot(): View {
@@ -85,7 +111,6 @@ class MainActivity : Activity() {
             setBackgroundColor(getColor(R.color.bg))
         }
         root.addView(buildHeader())
-
         content = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(mp, 0, 1f)
         }
@@ -130,11 +155,7 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
         val labels = listOf("Swap", "Live", "Settings")
-        val icons = listOf(
-            android.R.drawable.ic_menu_gallery,
-            android.R.drawable.ic_menu_camera,
-            android.R.drawable.ic_menu_preferences,
-        )
+        val icons = listOf(R.drawable.ic_nav_swap, R.drawable.ic_nav_live, R.drawable.ic_nav_settings)
         for (i in labels.indices) {
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -168,8 +189,8 @@ class MainActivity : Activity() {
         navItems.forEachIndexed { i, item ->
             val on = i == index
             item.setBackgroundResource(if (on) R.drawable.bg_pill else 0)
-            navIcons[i].setColorFilter(getColor(if (on) R.color.accent else R.color.text_dim))
-            navLabels[i].setTextColor(getColor(if (on) R.color.accent else R.color.text_dim))
+            navIcons[i].setColorFilter(getColor(if (on) R.color.white else R.color.text_dim))
+            navLabels[i].setTextColor(getColor(if (on) R.color.white else R.color.text_dim))
         }
     }
 
@@ -177,55 +198,77 @@ class MainActivity : Activity() {
 
     private fun buildSwapTab(): View {
         val col = column()
-        col.addView(sectionTitle("Swap"))
+        col.addView(pageTitle("Swap"))
 
-        val sourceCard = card()
-        sourceCard.addView(cardHeader("SOURCE FACE"))
-        val sourcePicker = makePicker("Pick source face") { pickImages(REQ_SOURCE, true) }
-        sourcePreview = sourcePicker.preview
-        sourceHint = sourcePicker.hint
-        sourceCard.addView(sourcePicker.box)
-        col.addView(sourceCard)
-
+        val source = pickerCard(
+            label = "SOURCE FACE",
+            hint = "Pick source face",
+            onPick = { pickImages(REQ_SOURCE, true) },
+            onCamera = { capture(isSource = true) },
+        )
+        sourcePreview = source.preview
+        sourceHint = source.hint
+        col.addView(source.card)
         sourceCaption = caption("The face to copy FROM")
         col.addView(sourceCaption)
 
-        val targetCard = card()
-        targetCard.addView(cardHeader("TARGET IMAGE"))
-        val targetPicker = makePicker("Pick target image") { pickImages(REQ_TARGET, false) }
-        targetPreview = targetPicker.preview
-        targetHint = targetPicker.hint
-        targetCard.addView(targetPicker.box)
-        col.addView(targetCard)
-
+        val target = pickerCard(
+            label = "TARGET IMAGE",
+            hint = "Pick target image",
+            onPick = { pickImages(REQ_TARGET, false) },
+            onCamera = { capture(isSource = false) },
+        )
+        targetPreview = target.preview
+        targetHint = target.hint
+        col.addView(target.card)
         targetCaption = caption("The photo to swap the face ONTO")
         col.addView(targetCaption)
 
-        mouthMask = CheckBox(this).apply {
-            text = "Preserve target mouth"
-            setTextColor(getColor(R.color.text))
-        }
-        multiFace = CheckBox(this).apply {
-            text = "Multi-face (interactive mapping not on device)"
-            setTextColor(getColor(R.color.text))
-        }
-        col.addView(mouthMask)
-        col.addView(multiFace)
+        val options = card()
+        mouthMask = addToggle(
+            options,
+            "Preserve target mouth",
+            "Keep the target's mouth expression",
+            false,
+        )
+        options.addView(divider())
+        multiFace = addToggle(
+            options,
+            "Multi-face",
+            "Swap every detected face (no mapping UI on device)",
+            false,
+        )
+        col.addView(options)
 
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(14) }
+        }
         startButton = Button(this).apply {
             text = "Start swap"
             isAllCaps = false
             textSize = 16f
             setTextColor(getColor(R.color.bg))
-            background = getDrawable(R.drawable.btn_primary)
-            layoutParams = LinearLayout.LayoutParams(mp, dp(52)).apply { topMargin = dp(14) }
+            background = getDrawable(R.drawable.btn_white)
+            layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f)
             setOnClickListener { runSwap() }
         }
-        col.addView(startButton)
+        val resetButton = Button(this).apply {
+            text = "Reset"
+            isAllCaps = false
+            textSize = 16f
+            setTextColor(getColor(R.color.text))
+            background = getDrawable(R.drawable.btn_secondary)
+            layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginStart = dp(10) }
+            setOnClickListener { reset() }
+        }
+        buttonRow.addView(startButton)
+        buttonRow.addView(resetButton)
+        col.addView(buttonRow)
 
         progress = ProgressBar(this).apply {
             visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 topMargin = dp(12)
             }
@@ -250,13 +293,71 @@ class MainActivity : Activity() {
         return scroll(col)
     }
 
+    private fun pickerCard(
+        label: String,
+        hint: String,
+        onPick: () -> Unit,
+        onCamera: () -> Unit,
+    ): Picker {
+        val card = card()
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(10))
+        }
+        head.addView(TextView(this).apply {
+            text = label
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 12f
+            letterSpacing = 0.15f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }, LinearLayout.LayoutParams(0, wc, 1f))
+        head.addView(iconButton(R.drawable.ic_people) { onPick() })
+        head.addView(iconButton(R.drawable.ic_camera) { onCamera() })
+        card.addView(head)
+
+        val box = FrameLayout(this).apply {
+            background = getDrawable(R.drawable.bg_card_inner)
+            layoutParams = LinearLayout.LayoutParams(mp, dp(170))
+            isClickable = true
+            setOnClickListener { onPick() }
+        }
+        val preview = ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(mp, mp)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+        }
+        val hintBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(mp, mp)
+        }
+        hintBox.addView(TextView(this).apply {
+            text = "+"
+            textSize = 34f
+            gravity = Gravity.CENTER
+            setTextColor(getColor(R.color.text_dim))
+        })
+        hintBox.addView(TextView(this).apply {
+            text = hint
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(getColor(R.color.text_dim))
+            setPadding(0, dp(6), 0, 0)
+        })
+        box.addView(preview)
+        box.addView(hintBox)
+        card.addView(box)
+        return Picker(card, box, preview, hintBox)
+    }
+
     // ------------------------------------------------------------- live tab --
 
     private fun buildLiveTab(): View {
         val col = column()
-        col.addView(sectionTitle("Live"))
+        col.addView(pageTitle("Live"))
         val c = card()
-        c.addView(cardHeader("LIVE CAMERA"))
+        c.addView(sectionLabel("LIVE CAMERA"))
         c.addView(TextView(this).apply {
             text = "Real-time camera swapping isn't part of this Android port.\n\n" +
                 "This build runs the Rust engine on still images. A live mode would " +
@@ -275,35 +376,219 @@ class MainActivity : Activity() {
     // --------------------------------------------------------- settings tab --
 
     private fun buildSettingsTab(): View {
-        val col = column()
-        col.addView(sectionTitle("Settings"))
+        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        wrap.addView(pageTitle("Settings", padH = 16, topPad = 14))
+        wrap.addView(buildSubTabs())
 
-        val modelsCard = card()
-        modelsCard.addView(cardHeader("MODELS"))
-        modelsStatus = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = 12f
-            setTextColor(getColor(R.color.text))
+        val host = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(mp, 0, 1f)
         }
-        modelsCard.addView(modelsStatus)
-        modelsCard.addView(primaryButton("Download models") { downloadModels() })
-        modelsCard.addView(secondaryButton("Check models") {
-            refreshModels()
-            log(models.statusText())
-        })
-        col.addView(modelsCard)
+        subtabPages.add(buildModelsPage())
+        subtabPages.add(buildDevicePage())
+        subtabPages.add(buildAboutPage())
+        subtabPages.forEach {
+            it.visibility = View.GONE
+            host.addView(it)
+        }
+        wrap.addView(host)
+        return wrap
+    }
 
-        val aboutCard = card()
-        aboutCard.addView(cardHeader("ABOUT"))
-        aboutCard.addView(TextView(this).apply {
-            text = "Deep FaceSwap ${NativeBridge.version()}\n" +
-                "Rust core via JNI · arm64-v8a\n" +
-                "Port of LdDl/deep_faceswap (MIT)"
+    private fun buildSubTabs(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(getColor(R.color.surface))
+        }
+        listOf("Models", "Device", "About").forEachIndexed { i, name ->
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, wc, 1f)
+                isClickable = true
+                setOnClickListener { selectSubTab(i) }
+            }
+            val label = TextView(this).apply {
+                text = name
+                textSize = 15f
+                gravity = Gravity.CENTER
+                setPadding(0, dp(12), 0, dp(10))
+            }
+            val indicator = View(this).apply {
+                setBackgroundColor(getColor(R.color.white))
+                layoutParams = LinearLayout.LayoutParams(mp, dp(2))
+                visibility = View.INVISIBLE
+            }
+            col.addView(label)
+            col.addView(indicator)
+            subtabLabels.add(label)
+            subtabIndicators.add(indicator)
+            row.addView(col)
+        }
+        return row
+    }
+
+    private fun selectSubTab(index: Int) {
+        subtabPages.forEachIndexed { i, p -> p.visibility = if (i == index) View.VISIBLE else View.GONE }
+        subtabLabels.forEachIndexed { i, l ->
+            l.setTextColor(getColor(if (i == index) R.color.text else R.color.text_dim))
+        }
+        subtabIndicators.forEachIndexed { i, v ->
+            v.visibility = if (i == index) View.VISIBLE else View.INVISIBLE
+        }
+    }
+
+    private fun buildModelsPage(): View {
+        val col = column()
+        col.addView(sectionLabel("ONNX MODELS"))
+        modelsSummary = TextView(this).apply {
             setTextColor(getColor(R.color.text_dim))
-            textSize = 13f
-            setLineSpacing(dp(3).toFloat(), 1f)
+            textSize = 13.5f
+            setPadding(0, 0, 0, dp(12))
+        }
+        col.addView(modelsSummary)
+
+        val listCard = card()
+        modelsRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        listCard.addView(modelsRows)
+        col.addView(listCard)
+
+        col.addView(primaryButton("Download all") { downloadAll() })
+        return scroll(col)
+    }
+
+    private fun renderModels() {
+        if (!::modelsRows.isInitialized) return
+        modelsRows.removeAllViews()
+        if (::modelsSummary.isInitialized) modelsSummary.text = models.summaryLine()
+        val list = models.models()
+        list.forEachIndexed { i, m ->
+            modelsRows.addView(modelRow(m))
+            if (i != list.lastIndex) modelsRows.addView(divider())
+        }
+    }
+
+    private fun modelRow(m: ModelManager.Model): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(13), 0, dp(13))
+        }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(TextView(this).apply {
+            text = m.title
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
         })
-        col.addView(aboutCard)
+
+        val status = when {
+            m.installed -> "installed"
+            m.required -> "not installed (required)"
+            else -> "not installed"
+        }
+        val line = SpannableString("${m.fileName}   $status")
+        line.setSpan(
+            ForegroundColorSpan(getColor(R.color.text_dim)),
+            0, m.fileName.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        val statusColor = if (!m.installed && m.required) R.color.danger else R.color.text_dim
+        line.setSpan(
+            ForegroundColorSpan(getColor(statusColor)),
+            m.fileName.length, line.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        col.addView(TextView(this).apply {
+            text = line
+            textSize = 12.5f
+            setPadding(0, dp(3), 0, 0)
+        })
+        row.addView(col, LinearLayout.LayoutParams(0, wc, 1f))
+
+        if (m.installed) {
+            row.addView(TextView(this).apply {
+                text = "\u2713"
+                setTextColor(getColor(R.color.ok))
+                textSize = 16f
+            })
+        } else {
+            row.addView(TextView(this).apply {
+                text = "Download"
+                setTextColor(getColor(R.color.white))
+                textSize = 15f
+                setPadding(dp(10), dp(6), 0, dp(6))
+                isClickable = true
+                setOnClickListener { downloadModel(m) }
+            })
+        }
+        return row
+    }
+
+    private fun buildDevicePage(): View {
+        val col = column()
+        col.addView(sectionLabel("DEVICE"))
+        val c = card()
+        deviceRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        c.addView(deviceRows)
+        col.addView(c)
+        return scroll(col)
+    }
+
+    private fun renderDevice() {
+        if (!::deviceRows.isInitialized) return
+        deviceRows.removeAllViews()
+        val rows = listOf(
+            "ABI" to Build.SUPPORTED_ABIS.joinToString(", "),
+            "Android" to "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+            "Engine" to NativeBridge.version(),
+            "App" to APP_VERSION,
+            "Models dir" to models.modelsDir.absolutePath,
+            "On disk" to ModelManager.humanSize(models.totalBytes()),
+        )
+        rows.forEachIndexed { i, pair ->
+            deviceRows.addView(infoRow(pair.first, pair.second))
+            if (i != rows.lastIndex) deviceRows.addView(divider())
+        }
+    }
+
+    private fun infoRow(label: String, value: String): View {
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(11), 0, dp(11))
+        }
+        col.addView(TextView(this).apply {
+            text = label
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 12.5f
+        })
+        col.addView(TextView(this).apply {
+            text = value
+            setTextColor(getColor(R.color.text))
+            textSize = 14f
+            typeface = Typeface.MONOSPACE
+            setPadding(0, dp(3), 0, 0)
+        })
+        return col
+    }
+
+    private fun buildAboutPage(): View {
+        val col = column()
+        col.addView(sectionLabel("ABOUT"))
+        val c = card()
+        c.addView(TextView(this).apply {
+            text = "Deep FaceSwap ${NativeBridge.version()}"
+            setTextColor(getColor(R.color.text))
+            textSize = 16f
+        })
+        c.addView(TextView(this).apply {
+            text = "Native Android port of LdDl/deep_faceswap (MIT). " +
+                "The Rust engine runs on-device through JNI; ONNX Runtime is " +
+                "statically linked and inference is CPU-only on arm64-v8a.\n\n" +
+                "Still images only — video needs FFmpeg, and live camera swapping " +
+                "needs a camera pipeline, neither of which is in this port."
+            setTextColor(getColor(R.color.text_dim))
+            textSize = 13.5f
+            setLineSpacing(dp(4).toFloat(), 1f)
+            setPadding(0, dp(8), 0, 0)
+        })
+        col.addView(c)
         return scroll(col)
     }
 
@@ -319,12 +604,21 @@ class MainActivity : Activity() {
         setPadding(dp(16), dp(8), dp(16), dp(20))
     }
 
-    private fun sectionTitle(text: String): TextView = TextView(this).apply {
+    private fun pageTitle(text: String, padH: Int = 0, topPad: Int = 6): TextView = TextView(this).apply {
         this.text = text
         setTextColor(getColor(R.color.text))
         textSize = 22f
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        setPadding(0, dp(6), 0, dp(12))
+        setPadding(dp(padH), dp(topPad), dp(padH), dp(12))
+    }
+
+    private fun sectionLabel(text: String): TextView = TextView(this).apply {
+        this.text = text
+        setTextColor(getColor(R.color.text_dim))
+        textSize = 12f
+        letterSpacing = 0.15f
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        setPadding(0, dp(4), 0, dp(8))
     }
 
     private fun card(): LinearLayout = LinearLayout(this).apply {
@@ -334,15 +628,6 @@ class MainActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(mp, wc)
     }
 
-    private fun cardHeader(text: String): TextView = TextView(this).apply {
-        this.text = text
-        setTextColor(getColor(R.color.text_dim))
-        textSize = 12f
-        letterSpacing = 0.15f
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        setPadding(0, 0, 0, dp(10))
-    }
-
     private fun caption(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(getColor(R.color.text_dim))
@@ -350,56 +635,60 @@ class MainActivity : Activity() {
         setPadding(dp(4), dp(8), dp(4), dp(14))
     }
 
-    private fun makePicker(hintText: String, onClick: () -> Unit): Picker {
-        val box = FrameLayout(this).apply {
-            background = getDrawable(R.drawable.bg_card_inner)
-            layoutParams = LinearLayout.LayoutParams(mp, dp(200))
-            isClickable = true
-            setOnClickListener { onClick() }
+    private fun divider(): View = View(this).apply {
+        setBackgroundColor(getColor(R.color.divider))
+        layoutParams = LinearLayout.LayoutParams(mp, dp(1))
+    }
+
+    private fun iconButton(res: Int, onClick: () -> Unit): ImageView = ImageView(this).apply {
+        setImageResource(res)
+        setColorFilter(getColor(R.color.text_dim))
+        layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginStart = dp(16) }
+        isClickable = true
+        setOnClickListener { onClick() }
+    }
+
+    private fun addToggle(
+        parent: LinearLayout,
+        title: String,
+        subtitle: String,
+        checked: Boolean,
+    ): Switch {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
         }
-        val preview = ImageView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(mp, mp)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            visibility = View.GONE
-        }
-        val hint = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(mp, mp)
-        }
-        hint.addView(TextView(this).apply {
-            text = "+"
-            textSize = 34f
-            gravity = Gravity.CENTER
-            setTextColor(getColor(R.color.text_dim))
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(TextView(this).apply {
+            text = title
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
         })
-        hint.addView(TextView(this).apply {
-            text = hintText
-            textSize = 14f
-            gravity = Gravity.CENTER
+        col.addView(TextView(this).apply {
+            text = subtitle
             setTextColor(getColor(R.color.text_dim))
-            setPadding(0, dp(6), 0, 0)
+            textSize = 13f
+            setPadding(0, dp(2), 0, 0)
         })
-        box.addView(preview)
-        box.addView(hint)
-        return Picker(box, preview, hint)
+        row.addView(col, LinearLayout.LayoutParams(0, wc, 1f))
+
+        val toggle = Switch(this).apply {
+            isChecked = checked
+            trackTintList = getColorStateList(R.color.switch_track)
+            thumbTintList = getColorStateList(R.color.switch_thumb)
+        }
+        row.addView(toggle)
+        parent.addView(row)
+        return toggle
     }
 
     private fun primaryButton(text: String, onClick: () -> Unit): Button = Button(this).apply {
         this.text = text
         isAllCaps = false
         setTextColor(getColor(R.color.bg))
-        background = getDrawable(R.drawable.btn_primary)
-        layoutParams = LinearLayout.LayoutParams(mp, dp(48)).apply { topMargin = dp(10) }
-        setOnClickListener { onClick() }
-    }
-
-    private fun secondaryButton(text: String, onClick: () -> Unit): Button = Button(this).apply {
-        this.text = text
-        isAllCaps = false
-        setTextColor(getColor(R.color.text))
-        background = getDrawable(R.drawable.btn_secondary)
-        layoutParams = LinearLayout.LayoutParams(mp, dp(48)).apply { topMargin = dp(8) }
+        background = getDrawable(R.drawable.btn_white)
+        layoutParams = LinearLayout.LayoutParams(mp, dp(50)).apply { topMargin = dp(12) }
         setOnClickListener { onClick() }
     }
 
@@ -413,15 +702,94 @@ class MainActivity : Activity() {
             type = "image/*"
             if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
-        @Suppress("DEPRECATION")
         startActivityForResult(intent, requestCode)
+    }
+
+    /** Take a photo straight into MediaStore (no FileProvider needed). */
+    @Suppress("DEPRECATION")
+    private fun capture(isSource: Boolean) {
+        val go: () -> Unit = {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, "dfs_${System.currentTimeMillis()}.jpg")
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            }
+            val uri = try {
+                contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            } catch (e: Exception) {
+                null
+            }
+            if (uri == null) {
+                toast("Camera capture unavailable — use the gallery")
+            } else {
+                pendingCaptureUri = uri
+                pendingCameraIsSource = isSource
+                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                    putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                }
+                try {
+                    startActivityForResult(intent, REQ_CAMERA)
+                } catch (e: ActivityNotFoundException) {
+                    pendingCaptureUri = null
+                    toast("No camera app found — use the gallery")
+                }
+            }
+        }
+
+        val granted = Build.VERSION.SDK_INT >= 29 ||
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            go()
+        } else {
+            pendingAfterPermission = go
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_PERMISSION)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_PERMISSION) return
+        val cb = pendingAfterPermission
+        pendingAfterPermission = null
+        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            cb?.invoke()
+        } else {
+            toast("Storage permission denied — use the gallery instead")
+        }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK || data == null) return
 
+        if (requestCode == REQ_CAMERA) {
+            val uri = pendingCaptureUri
+            pendingCaptureUri = null
+            if (resultCode != RESULT_OK || uri == null) return
+            val file = copyToCache(uri)
+            try {
+                contentResolver.delete(uri, null, null)
+            } catch (_: Exception) {
+                // best effort — leaving the capture in the gallery is harmless
+            }
+            if (file == null) return
+            if (pendingCameraIsSource) {
+                sourceFiles.clear()
+                sourceFiles.add(file)
+                showPreview(sourcePreview, sourceHint, file)
+                sourceCaption.text = "Source: ${file.name}"
+            } else {
+                targetFile = file
+                showPreview(targetPreview, targetHint, file)
+                targetCaption.text = "Target: ${file.name}"
+            }
+            return
+        }
+
+        if (resultCode != RESULT_OK || data == null) return
         val uris = mutableListOf<Uri>()
         data.clipData?.let { clip ->
             for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
@@ -474,6 +842,22 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- swap --
 
+    private fun reset() {
+        sourceFiles.clear()
+        targetFile = null
+        sourcePreview.setImageDrawable(null)
+        sourcePreview.visibility = View.GONE
+        sourceHint.visibility = View.VISIBLE
+        sourceCaption.text = "The face to copy FROM"
+        targetPreview.setImageDrawable(null)
+        targetPreview.visibility = View.GONE
+        targetHint.visibility = View.VISIBLE
+        targetCaption.text = "The photo to swap the face ONTO"
+        resultPreview.setImageDrawable(null)
+        resultPreview.visibility = View.GONE
+        log("Reset.")
+    }
+
     private fun runSwap() {
         if (sourceFiles.isEmpty()) {
             toast("Pick at least one source image")
@@ -485,7 +869,7 @@ class MainActivity : Activity() {
             return
         }
         if (!models.isReady()) {
-            log("Cannot swap — missing models:\n" + models.missing().joinToString("\n"))
+            log("Cannot swap — missing: " + models.missing().joinToString(", "))
             toast("Models missing — see Settings")
             return
         }
@@ -519,7 +903,25 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun downloadModels() {
+    private fun downloadModel(model: ModelManager.Model) {
+        setBusy(true, "Downloading ${model.title} …")
+        Thread {
+            val msg = try {
+                models.download(model) { p -> io.post { log(p) } }
+                "Installed ${model.title}."
+            } catch (e: Exception) {
+                "Failed (${model.title}): ${e.message}"
+            }
+            io.post {
+                setBusy(false, null)
+                log(msg)
+                renderModels()
+                renderDevice()
+            }
+        }.start()
+    }
+
+    private fun downloadAll() {
         setBusy(true, "Downloading models …")
         Thread {
             val summary = try {
@@ -530,21 +932,20 @@ class MainActivity : Activity() {
             io.post {
                 setBusy(false, null)
                 log(summary)
-                refreshModels()
+                renderModels()
+                renderDevice()
             }
         }.start()
-    }
-
-    private fun refreshModels() {
-        if (::modelsStatus.isInitialized) modelsStatus.text = models.statusText()
     }
 
     // -------------------------------------------------------------- helpers --
 
     private fun setBusy(busy: Boolean, message: String?) {
-        progress.visibility = if (busy) View.VISIBLE else View.GONE
-        startButton.isEnabled = !busy
-        startButton.alpha = if (busy) 0.5f else 1f
+        if (::progress.isInitialized) progress.visibility = if (busy) View.VISIBLE else View.GONE
+        if (::startButton.isInitialized) {
+            startButton.isEnabled = !busy
+            startButton.alpha = if (busy) 0.5f else 1f
+        }
         message?.let { log(it) }
     }
 
@@ -559,5 +960,8 @@ class MainActivity : Activity() {
     private companion object {
         const val REQ_SOURCE = 1
         const val REQ_TARGET = 2
+        const val REQ_CAMERA = 3
+        const val REQ_PERMISSION = 4
+        const val APP_VERSION = "0.3.0"
     }
 }

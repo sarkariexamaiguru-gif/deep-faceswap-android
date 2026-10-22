@@ -8,77 +8,164 @@ import java.net.URL
 import java.util.zip.ZipInputStream
 
 /**
- * Resolves and (optionally) downloads the ONNX models the engine needs.
+ * Resolves and downloads the ONNX models the engine needs.
  *
- * Models live under `filesDir/models`:
+ * Layout under `filesDir/models`:
  * ```
  * models/
  *   buffalo_l/
- *     det_10g.onnx      (face detector)
- *     w600k_r50.onnx    (ArcFace recogniser)
- *     2d106det.onnx     (106-point landmarks, mouth mask)
- *   inswapper_128.onnx       (face swapper)
- *   inswapper_128_emap.bin   (512x512 f32 embedding map, required by the swapper)
+ *     det_10g.onnx            face detector
+ *     w600k_r50.onnx          ArcFace recogniser
+ *     2d106det.onnx           106-point landmarks (mouth mask)
+ *   inswapper_128.onnx        face swapper
+ *   inswapper_128_emap.bin    emap sidecar (bundled in the APK, copied on launch)
  * ```
- *
- * The emap sidecar is not distributed with the upstream project; generate it
- * from `inswapper_128.onnx` with `scripts/extract_emap.py`, then push it to the
- * device (see the repository README). If you drop it in
- * `app/src/main/assets/inswapper_128_emap.bin` it is copied out automatically.
  */
 class ModelManager(private val context: Context) {
 
     val modelsDir = File(context.filesDir, "models")
     val buffaloDir = File(modelsDir, "buffalo_l")
 
-    val detectorPath = File(buffaloDir, "det_10g.onnx").absolutePath
-    val recognizerPath = File(buffaloDir, "w600k_r50.onnx").absolutePath
-    val landmarkPath = File(buffaloDir, "2d106det.onnx").absolutePath
-    val swapperPath = File(modelsDir, "inswapper_128.onnx").absolutePath
-    val emapPath = File(modelsDir, "inswapper_128_emap.bin").absolutePath
+    /** Where a model comes from. */
+    enum class Source { BUFFALO_ZIP, INSWAPPER, ASSET }
 
-    /** A required model file. */
-    data class Spec(val label: String, val file: File)
+    /**
+     * One downloadable model.
+     *
+     * @property title    human-readable name
+     * @property fileName file on disk
+     * @property dir      directory the file lives in
+     * @property required whether the engine needs it to run
+     * @property source   how to obtain it
+     * @property zipEntry entry name inside the buffalo_l archive
+     */
+    data class Model(
+        val title: String,
+        val fileName: String,
+        val dir: File,
+        val required: Boolean,
+        val source: Source,
+        val zipEntry: String? = null,
+    ) {
+        val file: File get() = File(dir, fileName)
+        val installed: Boolean get() = file.isFile && file.length() > 0L
+        val bytes: Long get() = if (installed) file.length() else 0L
+    }
 
-    fun specs(): List<Spec> = listOf(
-        Spec("det_10g.onnx (detector)", File(buffaloDir, "det_10g.onnx")),
-        Spec("w600k_r50.onnx (recogniser)", File(buffaloDir, "w600k_r50.onnx")),
-        Spec("2d106det.onnx (landmarks)", File(buffaloDir, "2d106det.onnx")),
-        Spec("inswapper_128.onnx (swapper)", File(modelsDir, "inswapper_128.onnx")),
-        Spec("inswapper_128_emap.bin (emap)", File(modelsDir, "inswapper_128_emap.bin")),
+    fun models(): List<Model> = listOf(
+        Model("Face detector", "det_10g.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "det_10g.onnx"),
+        Model("Face recogniser", "w600k_r50.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "w600k_r50.onnx"),
+        Model("Face landmarker", "2d106det.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "2d106det.onnx"),
+        Model("Face swapper", "inswapper_128.onnx", modelsDir, true, Source.INSWAPPER),
+        Model("Emap sidecar", "inswapper_128_emap.bin", modelsDir, true, Source.ASSET),
     )
 
+    // Paths handed to the JNI bridge.
+    val detectorPath get() = File(buffaloDir, "det_10g.onnx").absolutePath
+    val recognizerPath get() = File(buffaloDir, "w600k_r50.onnx").absolutePath
+    val landmarkPath get() = File(buffaloDir, "2d106det.onnx").absolutePath
+    val swapperPath get() = File(modelsDir, "inswapper_128.onnx").absolutePath
+    val emapPath get() = File(modelsDir, "inswapper_128_emap.bin").absolutePath
+
     fun ensureDirs() {
+        modelsDir.mkdirs()
         buffaloDir.mkdirs()
     }
 
-    fun missing(): List<String> = specs().filterNot { it.file.isFile }.map { it.label }
+    fun missing(): List<String> = models().filter { it.required && !it.installed }.map { it.title }
 
     fun isReady(): Boolean = missing().isEmpty()
 
+    fun installedCount(): Int = models().count { it.installed }
+
+    fun totalBytes(): Long = models().sumOf { it.bytes }
+
+    /** `"3 of 5 present, 412.6 MB on disk"` */
+    fun summaryLine(): String {
+        val all = models()
+        return "${all.count { it.installed }} of ${all.size} present, ${humanSize(totalBytes())} on disk"
+    }
+
     fun statusText(): String {
         ensureDirs()
-        val present = specs().filter { it.file.isFile }
-        val missing = missing()
         return buildString {
             append("Models dir: ${modelsDir.absolutePath}\n")
-            append("Present: ${present.size}/${specs().size}\n")
+            append(summaryLine())
+            val missing = missing()
             if (missing.isNotEmpty()) {
-                append("Missing:\n")
-                missing.forEach { append("  - $it\n") }
-            } else {
-                append("All models present.")
+                append("\nMissing: " + missing.joinToString(", "))
             }
         }
     }
 
-    /** Copy a bundled emap asset out to the models dir, if one is packaged. */
+    // ------------------------------------------------------------ downloads --
+
+    /** Download a single model. Buffalo members pull the shared archive once. */
+    fun download(model: Model, progress: (String) -> Unit) {
+        ensureDirs()
+        when (model.source) {
+            Source.BUFFALO_ZIP -> {
+                progress("Downloading buffalo_l.zip …")
+                downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, progress)
+            }
+            Source.INSWAPPER -> {
+                progress("Downloading inswapper_128.onnx …")
+                downloadFile(INSWAPPER_URL, File(modelsDir, model.fileName), progress)
+            }
+            Source.ASSET -> {
+                progress("Installing ${model.fileName} from the APK …")
+                if (!copyEmapFromAssetsIfPresent()) {
+                    throw IllegalStateException("emap asset missing from the APK")
+                }
+            }
+        }
+    }
+
+    /** Fetch everything that can be fetched automatically. Returns a log summary. */
+    fun downloadAll(progress: (String) -> Unit): String {
+        ensureDirs()
+        val log = StringBuilder()
+
+        val buffaloMissing = models()
+            .filter { it.source == Source.BUFFALO_ZIP && !it.installed }
+        if (buffaloMissing.isNotEmpty()) {
+            progress("Downloading buffalo_l.zip …")
+            try {
+                downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, progress)
+                log.append("buffalo_l models installed.\n")
+            } catch (e: Exception) {
+                log.append("buffalo_l download failed: ${e.message}\n")
+            }
+        }
+
+        val swapper = models().first { it.source == Source.INSWAPPER }
+        if (!swapper.installed) {
+            progress("Downloading inswapper_128.onnx …")
+            try {
+                downloadFile(INSWAPPER_URL, swapper.file, progress)
+                log.append("inswapper_128.onnx installed.\n")
+            } catch (e: Exception) {
+                log.append("inswapper download failed: ${e.message}\n")
+            }
+        }
+
+        if (copyEmapFromAssetsIfPresent()) {
+            log.append("emap installed.\n")
+        } else {
+            log.append("emap asset missing from the APK.\n")
+        }
+
+        if (log.isEmpty()) log.append("Everything already present.\n")
+        return log.toString()
+    }
+
+    /** Copy the bundled emap sidecar out of the APK assets. */
     fun copyEmapFromAssetsIfPresent(): Boolean {
         val target = File(modelsDir, "inswapper_128_emap.bin")
-        if (target.isFile) return true
+        if (target.isFile && target.length() > 0L) return true
         return try {
+            modelsDir.mkdirs()
             context.assets.open("inswapper_128_emap.bin").use { input ->
-                ensureDirs()
                 FileOutputStream(target).use { output -> input.copyTo(output) }
             }
             true
@@ -87,87 +174,24 @@ class ModelManager(private val context: Context) {
         }
     }
 
-    /**
-     * Download the models that can be fetched automatically (the three buffalo_l
-     * models and inswapper_128.onnx). The emap sidecar must be supplied separately.
-     *
-     * @return a summary string describing the outcome
-     */
-    fun downloadAll(progress: (String) -> Unit): String {
-        ensureDirs()
-        val log = StringBuilder()
-
-        // 1) buffalo_l.zip -> det_10g.onnx, w600k_r50.onnx, 2d106det.onnx
-        if (!File(buffaloDir, "det_10g.onnx").isFile ||
-            !File(buffaloDir, "w600k_r50.onnx").isFile ||
-            !File(buffaloDir, "2d106det.onnx").isFile
-        ) {
-            progress("Downloading buffalo_l.zip ...")
-            try {
-                downloadZip(
-                    "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
-                    buffaloDir,
-                    setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx"),
-                )
-                log.append("buffalo_l models downloaded.\n")
-            } catch (e: Exception) {
-                log.append("buffalo_l download failed: ${e.message}\n")
-            }
-        } else {
-            log.append("buffalo_l models already present.\n")
-        }
-
-        // 2) inswapper_128.onnx
-        val swapper = File(modelsDir, "inswapper_128.onnx")
-        if (!swapper.isFile) {
-            progress("Downloading inswapper_128.onnx ...")
-            try {
-                downloadFile(
-                    "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx",
-                    swapper,
-                    progress,
-                )
-                log.append("inswapper_128.onnx downloaded.\n")
-            } catch (e: Exception) {
-                log.append("inswapper download failed: ${e.message}\n")
-            }
-        } else {
-            log.append("inswapper_128.onnx already present.\n")
-        }
-
-        // 3) emap — from assets if packaged, otherwise the user must provide it.
-        if (copyEmapFromAssetsIfPresent()) {
-            log.append("emap ready.\n")
-        } else {
-            log.append(
-                "emap missing: run scripts/extract_emap.py and push " +
-                    "inswapper_128_emap.bin to ${modelsDir.absolutePath}\n",
-            )
-        }
-
-        return log.toString()
-    }
+    // -------------------------------------------------------------- plumbing --
 
     private fun downloadFile(url: String, target: File, progress: (String) -> Unit) {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-        }
+        val conn = open(url)
         conn.inputStream.use { input ->
             target.parentFile?.mkdirs()
             FileOutputStream(target).use { output ->
                 val buf = ByteArray(1 shl 16)
                 var total = 0L
-                var lastReport = 0L
+                var last = 0L
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
                     output.write(buf, 0, n)
                     total += n
-                    if (total - lastReport > (4L shl 20)) {
-                        progress("  ... ${total / (1 shl 20)} MiB")
-                        lastReport = total
+                    if (total - last > (4L shl 20)) {
+                        progress("  … ${humanSize(total)}")
+                        last = total
                     }
                 }
             }
@@ -175,24 +199,56 @@ class ModelManager(private val context: Context) {
         conn.disconnect()
     }
 
-    private fun downloadZip(url: String, destDir: File, wanted: Set<String>) {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-        }
+    private fun downloadZip(url: String, destDir: File, wanted: Set<String>, progress: (String) -> Unit) {
+        val conn = open(url)
         destDir.mkdirs()
+        var total = 0L
+        var last = 0L
         ZipInputStream(conn.inputStream.buffered()).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
                 val name = File(entry.name).name
-                if (entry.name in wanted || name in wanted) {
-                    FileOutputStream(File(destDir, name)).use { out -> zip.copyTo(out) }
+                if (name in wanted) {
+                    FileOutputStream(File(destDir, name)).use { out ->
+                        val buf = ByteArray(1 shl 16)
+                        while (true) {
+                            val n = zip.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            total += n
+                            if (total - last > (8L shl 20)) {
+                                progress("  … ${humanSize(total)}")
+                                last = total
+                            }
+                        }
+                    }
                 }
                 zip.closeEntry()
                 entry = zip.nextEntry
             }
         }
         conn.disconnect()
+    }
+
+    private fun open(url: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+        }
+
+    companion object {
+        private const val BUFFALO_ZIP_URL =
+            "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+        private const val INSWAPPER_URL =
+            "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx"
+
+        private val BUFFALO_ENTRIES = setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx")
+
+        fun humanSize(bytes: Long): String {
+            if (bytes <= 0L) return "0.0 MB"
+            val mb = bytes / 1_048_576.0
+            return if (mb >= 1024) String.format("%.2f GB", mb / 1024) else String.format("%.1f MB", mb)
+        }
     }
 }

@@ -4,6 +4,17 @@
     <!-- Used by the optional in-app model downloader. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Only needed to write a camera capture into MediaStore on API < 29;
+         on newer releases the insert needs no permission at all. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- The camera is optional: the app falls back to the gallery. -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

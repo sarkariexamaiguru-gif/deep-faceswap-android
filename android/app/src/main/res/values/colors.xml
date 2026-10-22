@@ -4,8 +4,12 @@
     <color name="surface">#FF17181C</color>
     <color name="surface_alt">#FF1F2126</color>
     <color name="stroke">#FF2A2D34</color>
+    <color name="divider">#FF23262C</color>
     <color name="text">#FFECEDEF</color>
     <color name="text_dim">#FF9AA0A6</color>
     <color name="accent">#FF4FD1C5</color>
     <color name="accent_dim">#FF2C7A73</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="danger">#FFFF6B6B</color>
+    <color name="ok">#FF7FD1A6</color>
 </resources>
