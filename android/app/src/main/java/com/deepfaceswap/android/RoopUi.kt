@@ -64,13 +64,13 @@ object RoopUi {
         }
     }
 
-    /** The app mark: a circular gradient orb with a soft swirl. */
+    /** The app mark: a gradient disc carrying Roop's face. */
     fun markTile(ctx: Context): FrameLayout = FrameLayout(ctx).apply {
         background = ctx.getDrawable(R.drawable.bg_gradient_oval)
         elevation = dp(ctx, 3).toFloat()
         layoutParams = lp(dp(ctx, 46), dp(ctx, 46))
         addView(ImageView(ctx).apply {
-            setImageResource(R.drawable.ic_mark_swirl)
+            setImageResource(R.drawable.ic_mark_face)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
             )

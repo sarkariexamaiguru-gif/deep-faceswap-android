@@ -144,7 +144,6 @@ class MainActivity : Activity() {
         models.copyEmapFromAssetsIfPresent()
 
         setContentView(buildShell())
-        applyWindowInsets()
 
         screens["swap"] = buildSwapScreen().also { content.addView(it) }
         screens["video"] = buildVideoScreen().also { content.addView(it) }
@@ -155,31 +154,37 @@ class MainActivity : Activity() {
         show("swap")
     }
 
+    /**
+     * FrameLayout shell: the header/switcher/content column fills the window and
+     * the navigation is pinned to the bottom. A LinearLayout with a weighted
+     * middle child left the bar floating mid-screen, so this is explicit.
+     */
     private fun buildShell(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val root = FrameLayout(this).apply {
             setBackgroundColor(getColor(R.color.canvas))
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            )
         }
-        root.addView(buildHeader())
-        root.addView(buildSwitcher())
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(buildHeader())
+        column.addView(buildSwitcher())
         content = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
             )
         }
-        root.addView(content)
-        root.addView(buildBottomNav())
+        column.addView(content)
+        root.addView(column, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+        root.addView(buildBottomNav(), FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            gravity = Gravity.BOTTOM
+            bottomMargin = dp(12)
+        })
         return root
-    }
-
-    /** Keep the bottom bar clear of the gesture area. */
-    private fun applyWindowInsets() {
-        window.decorView.setOnApplyWindowInsetsListener { view, insets ->
-            @Suppress("DEPRECATION")
-            val bottom = insets.systemWindowInsetBottom
-            view.setPadding(0, 0, 0, bottom)
-            insets
-        }
     }
 
     // --------------------------------------------------------------- shell
@@ -195,7 +200,7 @@ class MainActivity : Activity() {
 
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = RoopUi.margin(this@MainActivity, 0,
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 0, 0)
         }
         val brandTop = LinearLayout(this).apply {
@@ -207,7 +212,7 @@ class MainActivity : Activity() {
             this@MainActivity, getString(R.string.private_label),
             R.drawable.bg_pill_lavender, R.color.violet,
         ).apply {
-            layoutParams = RoopUi.margin(this@MainActivity, 0,
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 8, 0, 0, 0)
             setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_lock, 0, 0, 0)
             compoundDrawablePadding = dp(4)
@@ -282,7 +287,7 @@ class MainActivity : Activity() {
                         if (active) R.color.surface_solid else R.color.ink_secondary))
                     addView(RoopUi.text(this@MainActivity, label, 14f,
                         if (active) R.color.surface_solid else R.color.ink_secondary, 1).apply {
-                        layoutParams = RoopUi.margin(this@MainActivity, 0,
+                        layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT, 6, 0, 0, 0)
                     })
                     setOnClickListener { show(key) }
@@ -291,10 +296,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildBottomNav(): View {
-        val host = FrameLayout(this).apply {
-            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 12)
-        }
+        val host = FrameLayout(this)
         navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = getDrawable(R.drawable.bg_nav)
@@ -330,7 +332,7 @@ class MainActivity : Activity() {
                     if (active) R.color.blue else R.color.ink_secondary))
                 addView(RoopUi.text(this@MainActivity, label, 11f,
                     if (active) R.color.blue else R.color.ink_secondary, if (active) 1 else 0)
-                    .apply { layoutParams = RoopUi.margin(this@MainActivity, 0,
+                    .apply { layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 0, 3, 0, 0) })
                 setOnClickListener { show(key) }
             })
@@ -396,7 +398,7 @@ class MainActivity : Activity() {
         })
         header.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = RoopUi.margin(this@MainActivity, 0,
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 10, 0, 0, 0)
             addView(RoopUi.cardTitle(this@MainActivity, title))
             addView(RoopUi.meta(this@MainActivity, subtitle))
@@ -459,7 +461,7 @@ class MainActivity : Activity() {
         })
         row.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = RoopUi.margin(this@MainActivity, 0,
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 8, 0)
             addView(RoopUi.text(this@MainActivity, file.name, 13.5f, R.color.ink, 1).apply {
                 maxLines = 1
@@ -890,7 +892,7 @@ class MainActivity : Activity() {
         row.addView(RoopUi.softTile(this, iconRes, R.color.blue))
         row.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = RoopUi.margin(this@MainActivity, 0,
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 0, 0)
             addView(RoopUi.cardTitle(this@MainActivity, title))
             addView(RoopUi.meta(this@MainActivity, subtitle))
@@ -1627,7 +1629,7 @@ class MainActivity : Activity() {
         row.addView(RoopUi.softTile(this, iconForModel(model.title), R.color.blue))
         row.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = RoopUi.margin(this@MainActivity, 0,
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 10, 0, 8, 0)
             addView(RoopUi.text(this@MainActivity, model.title, 13.5f, R.color.ink, 1).apply {
                 maxLines = 1
@@ -1635,7 +1637,8 @@ class MainActivity : Activity() {
             })
             addView(RoopUi.meta(this@MainActivity,
                 "${model.fileName} \u00B7 ${model.approxSize} \u00B7 ${model.licence}"))
-        }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            .apply { marginStart = dp(10) })
 
         when {
             model.installed ->
