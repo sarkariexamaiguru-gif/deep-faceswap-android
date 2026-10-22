@@ -246,7 +246,6 @@ object NativeBridge {
         )
         return parse(json)
     }
-}
 
     /**
      * Swap faces across every frame of an animated GIF or WebP.
@@ -283,3 +282,4 @@ object NativeBridge {
         )
         return parse(json)
     }
+}
