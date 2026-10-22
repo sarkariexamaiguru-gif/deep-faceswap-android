@@ -1049,7 +1049,7 @@ class MainActivity : Activity() {
             if (item.favorite) "Remove from Favorites" else "Add to Favorites", "Delete")
         showSheet(item.fileName, options, -1, null) { pick ->
             when (options[pick]) {
-                "Preview" -> showResultCard(item)
+                "Preview" -> previewItem(item)
                 "Save to Gallery" -> {
                     if (saveToGallery(item.file)) toast("Saved to Gallery") else toast("Could not save")
                 }
@@ -1060,6 +1060,65 @@ class MainActivity : Activity() {
                 "Delete" -> confirmDelete(setOf(item.id), "Delete this item?")
             }
         }
+    }
+
+    /** History detail: the media itself, plus the actions that apply to it. */
+    private fun previewItem(item: HistoryManager.Item) {
+        val dialog = Dialog(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getDrawable(R.drawable.bg_sheet)
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        box.addView(RoopUi.text(this, item.fileName, 16f, R.color.ink, 1).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        })
+        box.addView(RoopUi.meta(this, describe(item.file)))
+
+        val holder = FrameLayout(this).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(320), 0, 12, 0, 0)
+            background = getDrawable(R.drawable.bg_thumb)
+            clipToOutline = true
+        }
+        if (isVideo(item.fileName)) {
+            holder.addView(VideoView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                setVideoPath(item.path)
+                setOnPreparedListener { player ->
+                    player.isLooping = true
+                    start()
+                }
+            })
+        } else {
+            holder.addView(ImageView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                loadThumb(item.file, this)
+            })
+        }
+        box.addView(holder)
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0)
+        }
+        actions.addView(textButton("Save", R.color.blue) {
+            if (saveToGallery(item.file)) toast("Saved to Gallery") else toast("Could not save")
+        }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        actions.addView(textButton("Share", R.color.blue) { share(item.file) },
+            RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        actions.addView(textButton("Close", R.color.ink_secondary) { dialog.dismiss() },
+            RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        box.addView(actions)
+        dialog.setContentView(box)
+        presentBottomSheet(dialog)
     }
 
     private fun confirmDelete(ids: Set<String>, message: String) {
@@ -1526,7 +1585,7 @@ class MainActivity : Activity() {
                         swapBar.progress = if (total > 0) done * 100 / total else 0
                         swapStatus.text = "Processing frame $done/$total"
                     } },
-                )
+                ).let { SwapOutcome(it.ok, it.error, it.frames) }
                 isAnimation(target.name) -> NativeBridge.swapAnimation(
                     this, sources, target.absolutePath, output.absolutePath,
                     if (manual) mappings.toList() else emptyList(),
