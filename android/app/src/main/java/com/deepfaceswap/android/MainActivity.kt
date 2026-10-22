@@ -150,6 +150,7 @@ class MainActivity : Activity() {
         screens["video"] = buildVideoScreen().also { content.addView(it) }
         screens["history"] = buildHistoryScreen().also { content.addView(it) }
         screens["settings"] = buildSettingsScreen().also { content.addView(it) }
+        screens["tools"] = buildToolsScreen().also { content.addView(it) }
 
         show("swap")
     }
@@ -218,14 +219,20 @@ class MainActivity : Activity() {
         })
         row.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
+        row.addView(iconButton(R.drawable.ic_crown, "Roop Pro", R.drawable.bg_crown) { showPro() })
         row.addView(iconButton(R.drawable.ic_settings, "Settings") { show("settings") })
         row.addView(iconButton(R.drawable.ic_dots, "More options") { showOverflow() })
         return row
     }
 
-    private fun iconButton(iconRes: Int, label: String, onClick: () -> Unit): FrameLayout =
+    private fun iconButton(
+        iconRes: Int,
+        label: String,
+        backgroundRes: Int = R.drawable.bg_card,
+        onClick: () -> Unit,
+    ): FrameLayout =
         FrameLayout(this).apply {
-            background = getDrawable(R.drawable.bg_card)
+            background = getDrawable(backgroundRes)
             layoutParams = RoopUi.margin(this@MainActivity, dp(44), dp(44), 8, 0, 0, 0)
             isClickable = true
             contentDescription = label
@@ -259,7 +266,7 @@ class MainActivity : Activity() {
 
     private fun renderSwitcher() {
         switcherRow.removeAllViews()
-        listOf("swap" to "Swap", "video" to "Video", "history" to "History")
+        listOf("swap" to "Swap", "video" to "Video", "history" to "History", "tools" to "Tools")
             .forEachIndexed { index, (key, label) ->
                 val active = key == current
                 switcherRow.addView(LinearLayout(this).apply {
@@ -333,6 +340,7 @@ class MainActivity : Activity() {
     private fun iconFor(key: String): Int = when (key) {
         "video" -> R.drawable.ic_video
         "history" -> R.drawable.ic_history
+        "tools" -> R.drawable.ic_tools
         else -> R.drawable.ic_swap
     }
 
@@ -348,6 +356,7 @@ class MainActivity : Activity() {
             "settings" -> renderSettings()
             "swap" -> refreshSwap()
             "video" -> refreshVideo()
+            "tools" -> Unit
         }
     }
 
@@ -363,6 +372,7 @@ class MainActivity : Activity() {
         step: Int,
         title: String,
         subtitle: String,
+        stepIcon: Int,
         emptyIcon: Int,
         emptyLine: String,
         emptyHint: String,
@@ -377,11 +387,11 @@ class MainActivity : Activity() {
         }
         header.addView(FrameLayout(this).apply {
             background = getDrawable(R.drawable.bg_gradient_tile)
-            layoutParams = RoopUi.lp(dp(32), dp(32))
-            addView(RoopUi.text(this@MainActivity, "$step", 15f, R.color.surface_solid, 2).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { gravity = Gravity.CENTER }
+            layoutParams = RoopUi.lp(dp(34), dp(34))
+            addView(RoopUi.iconView(this@MainActivity, stepIcon, 19, R.color.surface_solid).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(19), dp(19)).apply {
+                    gravity = Gravity.CENTER
+                }
             })
         })
         header.addView(LinearLayout(this).apply {
@@ -476,6 +486,7 @@ class MainActivity : Activity() {
 
         swapSource = uploadCard(
             step = 1,
+            stepIcon = R.drawable.ic_person,
             title = "Source Face",
             subtitle = "Face to copy FROM",
             emptyIcon = R.drawable.ic_person,
@@ -493,8 +504,9 @@ class MainActivity : Activity() {
 
         swapTarget = uploadCard(
             step = 2,
+            stepIcon = R.drawable.ic_image,
             title = "Target Image / Video",
-            subtitle = "Swap the face onto",
+            subtitle = "Swap the face ONTO",
             emptyIcon = R.drawable.ic_image,
             emptyLine = "Tap to upload target",
             emptyHint = "JPG \u00B7 PNG \u00B7 WebP \u00B7 GIF \u00B7 BMP \u00B7 TIFF \u00B7 AVIF\n" +
@@ -502,9 +514,6 @@ class MainActivity : Activity() {
             support = "Animated media is processed frame by frame",
             actions = listOf(
                 R.drawable.ic_camera to ("Take a photo" to { capture(REQ_CAM_TARGET) }),
-                R.drawable.ic_folder to ("Browse files" to {
-                    pickMedia(REQ_TARGET, multiple = false, allowVideo = true)
-                }),
                 R.drawable.ic_image to ("Choose from gallery" to {
                     pickMedia(REQ_TARGET, multiple = false, allowVideo = true)
                 }),
@@ -555,7 +564,7 @@ class MainActivity : Activity() {
 
         // Only claimed because every stage really is local.
         col.addView(RoopUi.privacyHint(
-            this, "All processing happens on your device. Your files never leave your phone.",
+            this, "All processing happens on your device. Your images never leave your phone.",
         ))
 
         swapResult = LinearLayout(this).apply {
@@ -565,7 +574,7 @@ class MainActivity : Activity() {
         }
         col.addView(swapResult)
 
-        return scrollPage(col)
+        return withBlooms(scrollPage(col, transparent = true))
     }
 
     private fun refreshSwap() {
@@ -598,7 +607,7 @@ class MainActivity : Activity() {
     private fun renderSwapTiles() {
         swapTiles.removeAllViews()
         swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_sparkle, "Quality", Prefs.QUALITY_ORDER[qualityIndex],
+            this, R.drawable.ic_sliders, "Quality", Prefs.QUALITY_ORDER[qualityIndex],
         ).apply {
             setOnClickListener {
                 showSheet(
@@ -615,13 +624,13 @@ class MainActivity : Activity() {
             }
         })
         swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false,
+            this, R.drawable.ic_scan, "Face Blend", "Not available", enabled = false,
         ))
         swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false,
+            this, R.drawable.ic_palette, "Color Match", "Not available", enabled = false,
         ))
         swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_shield, "Restore Details", if (restoreOn) "On" else "Off",
+            this, R.drawable.ic_hd, "Restore Details", if (restoreOn) "On" else "Off",
             enabled = models.enhancerInstalled,
         ).apply {
             if (models.enhancerInstalled) setOnClickListener {
@@ -727,7 +736,8 @@ class MainActivity : Activity() {
         })
 
         vidSource = uploadCard(
-            step = 1, title = "Source Face", subtitle = "Face to copy FROM",
+            step = 1, stepIcon = R.drawable.ic_person,
+            title = "Source Face", subtitle = "Face to copy FROM",
             emptyIcon = R.drawable.ic_person, emptyLine = "Tap to upload source face",
             emptyHint = "JPG \u00B7 PNG \u00B7 WebP",
             actions = listOf(
@@ -741,7 +751,7 @@ class MainActivity : Activity() {
         col.addView(vidSource.card)
 
         vidTarget = uploadCard(
-            step = 2, title = "Video", subtitle = "Swap the face onto",
+            step = 2, stepIcon = R.drawable.ic_video, title = "Video", subtitle = "Swap the face ONTO",
             emptyIcon = R.drawable.ic_video, emptyLine = "Tap to upload video",
             emptyHint = "MP4 \u00B7 MOV \u00B7 MKV \u00B7 WebM",
             actions = listOf(
@@ -815,7 +825,7 @@ class MainActivity : Activity() {
     private fun renderVideoTiles() {
         vidTiles.removeAllViews()
         vidTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_sparkle, "Quality", Prefs.QUALITY_ORDER[qualityIndex],
+            this, R.drawable.ic_sliders, "Quality", Prefs.QUALITY_ORDER[qualityIndex],
         ).apply {
             setOnClickListener {
                 showSheet("Quality", Prefs.QUALITY_ORDER, qualityIndex,
@@ -826,13 +836,13 @@ class MainActivity : Activity() {
             }
         })
         vidTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false,
+            this, R.drawable.ic_scan, "Face Blend", "Not available", enabled = false,
         ))
         vidTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_shield, "Similarity", "Not available", enabled = false,
         ))
         vidTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false,
+            this, R.drawable.ic_palette, "Color Match", "Not available", enabled = false,
         ))
         vidTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_volume, "Audio", if (vMute) "Mute" else "Keep original",
@@ -845,6 +855,62 @@ class MainActivity : Activity() {
                 }
             }
         })
+    }
+
+    // ------------------------------------------------------ tools screen
+
+    private fun buildToolsScreen(): View {
+        val col = pageColumn()
+        col.addView(RoopUi.screenTitle(this, "Tools"))
+        col.addView(RoopUi.body(this, "Extras that work on this device.").apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 18)
+        })
+        col.addView(toolCard(R.drawable.ic_person, "Face Mapping",
+            "Choose which face goes where") {
+            faceMode = 2
+            show("swap")
+        })
+        col.addView(toolCard(R.drawable.ic_cube, "Model Diagnostics",
+            "What is installed, its size and licence") { showModelDiagnostics() })
+        col.addView(toolCard(R.drawable.ic_folder, "Storage & Cache",
+            "Models, history and temporary files") { show("settings") })
+        col.addView(toolCard(R.drawable.ic_info, "Help & Guide",
+            "Source vs target, formats, limits") { showHelp() })
+        return scrollPage(col)
+    }
+
+    private fun toolCard(iconRes: Int, title: String, subtitle: String,
+                         onClick: () -> Unit): View {
+        val card = RoopUi.card(this)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(RoopUi.softTile(this, iconRes, R.color.blue))
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = RoopUi.margin(this@MainActivity, 0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 0, 0)
+            addView(RoopUi.cardTitle(this@MainActivity, title))
+            addView(RoopUi.meta(this@MainActivity, subtitle))
+        }, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(RoopUi.iconView(this, R.drawable.ic_chevron, 16, R.color.ink_muted))
+        card.addView(row)
+        card.isClickable = true
+        card.contentDescription = title
+        card.setOnClickListener { onClick() }
+        RoopUi.pressScale(card)
+        return card
+    }
+
+    private fun showModelDiagnostics() {
+        val lines = models.models().map { m ->
+            val state = if (models.isSwapperInstalled(m.fileName)) "installed" else "not downloaded"
+            "${m.title} \u00B7 ${m.approxSize} \u00B7 ${m.licence} \u00B7 $state"
+        }
+        showSheet("Model Diagnostics", lines, -1,
+            lines.map { "Tap for details in Settings \u2192 AI Models." }) { show("settings") }
     }
 
     // ---------------------------------------------------- history screen
@@ -916,8 +982,12 @@ class MainActivity : Activity() {
 
     private fun renderHistory() {
         historyChips.removeAllViews()
+        val chipIcons = mapOf(
+            "Images" to R.drawable.ic_image, "Videos" to R.drawable.ic_video,
+            "GIFs" to R.drawable.ic_gif, "Favorites" to R.drawable.ic_heart,
+        )
         listOf("All", "Images", "Videos", "GIFs", "Favorites").forEach { label ->
-            historyChips.addView(RoopUi.chip(this, label, label == hFilter).apply {
+            historyChips.addView(RoopUi.chip(this, label, label == hFilter, chipIcons[label]).apply {
                 layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 8, 0)
                 setOnClickListener { hFilter = label; renderHistory() }
@@ -952,6 +1022,9 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
+            header.addView(RoopUi.groupCheck(this).apply {
+                layoutParams = RoopUi.margin(this@MainActivity, dp(22), dp(22), 0, 0, 9, 0)
+            })
             header.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(RoopUi.text(this@MainActivity, group.label, 15f, R.color.ink, 1))
@@ -971,14 +1044,17 @@ class MainActivity : Activity() {
             historyList.addView(card)
         }
 
-        if (hSelection.isNotEmpty()) {
-            val del = RoopUi.primaryButton(this, "Delete Selected (${hSelection.size})",
-                R.drawable.ic_trash)
-            del.setOnClickListener {
+        val del = RoopUi.primaryButton(this, "Delete Selected (${hSelection.size})",
+            R.drawable.ic_trash, trailingArrow = false)
+        del.setOnClickListener {
+            if (hSelection.isEmpty()) {
+                toast("Select items first")
+            } else {
                 confirmDelete(hSelection.toSet(), "Delete ${hSelection.size} items?")
             }
-            historyBulk.addView(del)
         }
+        RoopUi.setPrimaryEnabled(del, hSelection.isNotEmpty())
+        historyBulk.addView(del)
     }
 
     private fun thumbnail(item: HistoryManager.Item): View =
@@ -1005,21 +1081,43 @@ class MainActivity : Activity() {
                         gravity = Gravity.CENTER } })
             }
 
-            val badge = if (item.exists) item.typeBadge else "MISSING"
-            addView(RoopUi.pill(this@MainActivity, badge, R.drawable.bg_badge,
-                R.color.surface_solid).apply {
+            // Bottom-left: the type, or the running time for a video (artboard).
+            val isVideoItem = item.kind == HistoryManager.Kind.VIDEO
+            val badgeText = when {
+                !item.exists -> "MISSING"
+                isVideoItem && item.durationLabel.isNotEmpty() -> item.durationLabel
+                else -> item.typeBadge
+            }
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = getDrawable(R.drawable.bg_badge)
+                setPadding(dp(7), dp(3), dp(8), dp(3))
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ).apply { gravity = Gravity.BOTTOM or Gravity.START; marginStart = dp(6); bottomMargin = dp(6) }
+                addView(RoopUi.iconView(this@MainActivity,
+                    if (isVideoItem) R.drawable.ic_video else R.drawable.ic_image, 11,
+                    R.color.surface_solid))
+                addView(RoopUi.text(this@MainActivity, badgeText, 9.5f, R.color.surface_solid, 1)
+                    .apply { setPadding(dp(4), 0, 0, 0) })
             })
-            if (item.durationLabel.isNotEmpty()) {
-                addView(RoopUi.pill(this@MainActivity, item.durationLabel, R.drawable.bg_badge,
+            addView(FrameLayout(this@MainActivity).apply {
+                background = getDrawable(R.drawable.bg_badge)
+                layoutParams = FrameLayout.LayoutParams(dp(22), dp(22)).apply {
+                    gravity = Gravity.BOTTOM or Gravity.END
+                    marginEnd = dp(6); bottomMargin = dp(6)
+                }
+                isClickable = true
+                contentDescription = "Actions for ${item.fileName}"
+                addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_dots, 12,
                     R.color.surface_solid).apply {
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ).apply { gravity = Gravity.BOTTOM or Gravity.END; marginEnd = dp(6); bottomMargin = dp(6) }
+                    layoutParams = FrameLayout.LayoutParams(dp(12), dp(12)).apply {
+                        gravity = Gravity.CENTER
+                    }
                 })
-            }
+                setOnClickListener { showItemSheet(item) }
+            })
             if (item.favorite) {
                 addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_star, 15, R.color.warning)
                     .apply { layoutParams = FrameLayout.LayoutParams(dp(15), dp(15)).apply {
@@ -1570,6 +1668,12 @@ class MainActivity : Activity() {
         box.addView(textButton("Done", R.color.blue) { dialog.dismiss() })
         dialog.setContentView(box)
         presentBottomSheet(dialog)
+    }
+
+    private fun showPro() {
+        showSheet("Roop Pro", listOf("Not available in this build"), -1,
+            listOf("There is no paid tier yet. Everything here already runs on your device, " +
+                "with no account and no upload.")) { }
     }
 
     private fun showCredits() {
@@ -2225,10 +2329,26 @@ class MainActivity : Activity() {
         setPadding(dp(20), dp(22), dp(20), dp(96))
     }
 
-    private fun scrollPage(inner: View): ScrollView = ScrollView(this).apply {
-        isFillViewport = true
+    private fun scrollPage(inner: View, transparent: Boolean = false): ScrollView =
+        ScrollView(this).apply {
+            isFillViewport = true
+            if (!transparent) setBackgroundColor(getColor(R.color.canvas))
+            addView(inner)
+        }
+
+    /** Decorative blooms sit behind the content, never over text. */
+    private fun withBlooms(page: View): View = FrameLayout(this).apply {
         setBackgroundColor(getColor(R.color.canvas))
-        addView(inner)
+        addView(ImageView(this@MainActivity).apply {
+            setImageResource(R.drawable.bg_bloom)
+            scaleType = ImageView.ScaleType.FIT_START
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(420),
+            ).apply { gravity = Gravity.TOP }
+        })
+        addView(page, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
     }
 
     /** Decode a thumbnail; animated GIFs animate where the platform supports it. */

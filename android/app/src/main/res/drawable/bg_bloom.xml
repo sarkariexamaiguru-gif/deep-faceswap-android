@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Decorative blooms behind the hero. Static, low opacity, never over text. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:gravity="top|end" android:width="300dp" android:height="300dp"
+        android:top="-70dp" android:end="-40dp">
+        <shape android:shape="oval">
+            <gradient android:type="radial" android:gradientRadius="150dp"
+                android:startColor="#6E78AAFF" android:endColor="#0078AAFF" />
+        </shape>
+    </item>
+    <item android:gravity="top|end" android:width="240dp" android:height="240dp"
+        android:top="40dp" android:end="-90dp">
+        <shape android:shape="oval">
+            <gradient android:type="radial" android:gradientRadius="120dp"
+                android:startColor="#59F096D2" android:endColor="#00F096D2" />
+        </shape>
+    </item>
+    <item android:gravity="top|start" android:width="220dp" android:height="220dp"
+        android:top="-100dp" android:start="-70dp">
+        <shape android:shape="oval">
+            <gradient android:type="radial" android:gradientRadius="110dp"
+                android:startColor="#4D9682FF" android:endColor="#009682FF" />
+        </shape>
+    </item>
+</layer-list>

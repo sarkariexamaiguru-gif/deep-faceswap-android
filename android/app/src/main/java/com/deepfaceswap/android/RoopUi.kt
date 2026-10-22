@@ -64,23 +64,23 @@ object RoopUi {
         }
     }
 
-    /** The app mark: a gradient rounded square inside a white outer tile. */
+    /** The app mark: a circular gradient orb with a soft swirl. */
     fun markTile(ctx: Context): FrameLayout = FrameLayout(ctx).apply {
-        background = ctx.getDrawable(R.drawable.bg_mark_tile)
+        background = ctx.getDrawable(R.drawable.bg_gradient_oval)
         elevation = dp(ctx, 3).toFloat()
-        layoutParams = lp(dp(ctx, 48), dp(ctx, 48))
-        addView(FrameLayout(ctx).apply {
-            background = ctx.getDrawable(R.drawable.bg_gradient_tile)
-            layoutParams = FrameLayout.LayoutParams(dp(ctx, 42), dp(ctx, 42)).apply {
-                gravity = Gravity.CENTER
-            }
-            addView(ImageView(ctx).apply {
-                setImageResource(R.drawable.ic_mark_face)
-                layoutParams = FrameLayout.LayoutParams(dp(ctx, 24), dp(ctx, 24)).apply {
-                    gravity = Gravity.CENTER
-                }
-            })
+        layoutParams = lp(dp(ctx, 46), dp(ctx, 46))
+        addView(ImageView(ctx).apply {
+            setImageResource(R.drawable.ic_mark_swirl)
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            )
         })
+    }
+
+    /** The leading checkbox on a history group header. */
+    fun groupCheck(ctx: Context): View = View(ctx).apply {
+        background = ctx.getDrawable(R.drawable.bg_check_box)
+        layoutParams = lp(dp(ctx, 22), dp(ctx, 22))
     }
 
     /** Small blue disc with a white tick, for selected cards. */
@@ -235,7 +235,12 @@ object RoopUi {
      * The primary gradient pill. Returns the container so callers can add an icon
      * and a trailing sparkle; use [setPrimaryEnabled] to toggle its state.
      */
-    fun primaryButton(ctx: Context, label: String, iconRes: Int?): LinearLayout =
+    fun primaryButton(
+        ctx: Context,
+        label: String,
+        iconRes: Int?,
+        trailingArrow: Boolean = true,
+    ): LinearLayout =
         LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -254,7 +259,20 @@ object RoopUi {
                 tag = "label"
             })
             addView(View(ctx).apply { layoutParams = weight(0, 1, 1f) })
-            addView(iconView(ctx, R.drawable.ic_sparkle, 17, R.color.surface_solid))
+            if (trailingArrow) {
+                addView(FrameLayout(ctx).apply {
+                    background = ctx.getDrawable(R.drawable.bg_white_circle)
+                    layoutParams = margin(ctx, dp(ctx, 38), dp(ctx, 38), 0, 0, 9, 0)
+                    addView(iconView(ctx, R.drawable.ic_arrow, 19, R.color.blue).apply {
+                        tag = "keep" // never re-tinted by setPrimaryEnabled
+                        layoutParams = FrameLayout.LayoutParams(dp(ctx, 19), dp(ctx, 19)).apply {
+                            gravity = Gravity.CENTER
+                        }
+                    })
+                })
+            } else {
+                addView(View(ctx).apply { layoutParams = lp(dp(ctx, 18), 1) })
+            }
             pressScale(this)
         }
 
@@ -271,7 +289,7 @@ object RoopUi {
                 if (child is TextView) child.setTextColor(
                     row.context.getColor(if (enabled) R.color.surface_solid else R.color.ink_muted),
                 )
-                if (child is ImageView) child.setColorFilter(
+                if (child is ImageView && child.tag != "keep") child.setColorFilter(
                     row.context.getColor(if (enabled) R.color.surface_solid else R.color.ink_muted),
                 )
             }
@@ -324,18 +342,23 @@ object RoopUi {
             })
         }
 
-    fun chip(ctx: Context, label: String, active: Boolean, iconRes: Int? = null): TextView =
-        TextView(ctx).apply {
-            text = label
-            textSize = 13f
+    fun chip(ctx: Context, label: String, active: Boolean, iconRes: Int? = null): LinearLayout =
+        LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(ctx, 14), dp(ctx, 8), dp(ctx, 14), dp(ctx, 8))
             background = ctx.getDrawable(
                 if (active) R.drawable.bg_gradient_chip else R.drawable.bg_chip,
             )
-            setTextColor(ctx.getColor(if (active) R.color.surface_solid else R.color.ink_secondary))
-            typeface = medium()
             isClickable = true
+            contentDescription = label
+            if (iconRes != null) {
+                addView(iconView(ctx, iconRes, 15,
+                    if (active) R.color.surface_solid else R.color.ink_secondary))
+                addView(View(ctx).apply { layoutParams = lp(dp(ctx, 6), 1) })
+            }
+            addView(text(ctx, label, 13f,
+                if (active) R.color.surface_solid else R.color.ink_secondary, 1))
             pressScale(this)
         }
 
