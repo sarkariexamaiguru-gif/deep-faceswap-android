@@ -67,7 +67,7 @@ object RoopUi {
     /** The app mark: the Roop emblem. */
     fun markTile(ctx: Context): FrameLayout = FrameLayout(ctx).apply {
         elevation = dp(ctx, 3).toFloat()
-        layoutParams = lp(dp(ctx, 46), dp(46))
+        layoutParams = lp(dp(ctx, 46), dp(ctx, 46))
         addView(ImageView(ctx).apply {
             setImageResource(R.drawable.roop_logo)
             scaleType = ImageView.ScaleType.FIT_CENTER
