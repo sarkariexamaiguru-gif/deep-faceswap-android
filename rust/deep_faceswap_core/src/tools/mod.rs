@@ -10,6 +10,7 @@
 //! a hash per file means a swapped mirror is caught, not executed.
 
 pub mod edit;
+pub mod image2image;
 pub mod upscale;
 
 use crate::types::{FaceSwapError, Result};
@@ -45,7 +46,36 @@ pub struct ToolSpec {
 /// Every tool the engine can run.
 ///
 /// Adding one means adding an entry here and an arm in `run`, nothing else.
-pub const TOOLS: &[ToolSpec] = &[ToolSpec {
+pub const TOOLS: &[ToolSpec] = &[
+ToolSpec {
+    id: "denoise",
+    name: "Denoise",
+    category: "Fix",
+    blurb: "Remove grain and sensor noise.",
+    model: ToolModel {
+        file: "scunet_color_real_gan_fp16.onnx",
+        url: "https://huggingface.co/colpona/dejpeg-models/resolve/main/scunet/scunet_color_real_gan_fp16.onnx",
+        sha256: "",
+        bytes: 39_500_000,
+        license: "Apache-2.0",
+    },
+    scale: 1,
+},
+ToolSpec {
+    id: "dejpeg",
+    name: "De-JPEG",
+    category: "Fix",
+    blurb: "Erase JPEG blocking at adjustable strength.",
+    model: ToolModel {
+        file: "1xDeJPG_OmniSR-fp16.onnx",
+        url: "https://huggingface.co/colpona/dejpeg-models/resolve/main/1xDeJPG_OmniSR-fp16.onnx",
+        sha256: "",
+        bytes: 2_360_000,
+        license: "Apache-2.0",
+    },
+    scale: 1,
+},
+ToolSpec {
     id: "upscale",
     name: "Upscale",
     category: "Repair",
@@ -95,6 +125,7 @@ impl ToolSession {
     pub fn load(tool_id: &str, model_path: &str) -> Result<Self> {
         let session = match tool_id {
             "upscale" => upscale::load(model_path)?,
+            "denoise" | "dejpeg" => image2image::load(model_path)?,
             other => {
                 return Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}")))
             }
@@ -113,6 +144,8 @@ impl ToolSession {
     pub fn run(&mut self, image: &Array3<u8>) -> Result<Array3<u8>> {
         match self.tool_id.as_str() {
             "upscale" => upscale::run(&mut self.session, image),
+            // One runner, because these differ only in which weights they loaded.
+            "denoise" | "dejpeg" => image2image::run(&mut self.session, image),
             other => Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}"))),
         }
     }

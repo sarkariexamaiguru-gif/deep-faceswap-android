@@ -1058,11 +1058,21 @@ class MainActivity : Activity() {
             },
         ))
         col.addView(homeRow(
-            homeTile(R.drawable.ic_filter, "Denoise", "Grain and phone noise", false) {
-                notYet("Denoise")
+            homeTile(R.drawable.ic_filter, "Denoise", "Grain and phone noise", true) {
+                startActivity(
+                    ToolActivity.intent(
+                        this@MainActivity, "denoise", "Denoise", "Remove grain and sensor noise.",
+                        ModelManager.SCUNET_FILE, 1,
+                    ),
+                )
             },
-            homeTile(R.drawable.ic_chip, "Deblock", "JPEG squares, adjustable", false) {
-                notYet("Deblock")
+            homeTile(R.drawable.ic_chip, "De-JPEG", "Erase JPEG blocking", true) {
+                startActivity(
+                    ToolActivity.intent(
+                        this@MainActivity, "dejpeg", "De-JPEG", "Erase JPEG blocking and mush.",
+                        ModelManager.OMNI_FILE, 1,
+                    ),
+                )
             },
         ))
         col.addView(homeRow(

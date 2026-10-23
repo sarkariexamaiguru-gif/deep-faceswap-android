@@ -41,6 +41,13 @@
             </intent-filter>
         </activity>
 
+        <!-- One screen for every tool: pick, fetch the model, run, save. -->
+        <activity
+            android:name=".ToolActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/Theme.Roop" />
+
         <!-- Upscale: the first tool wired end to end, registry to save. -->
         <activity
             android:name=".UpscaleActivity"
