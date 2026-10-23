@@ -1696,7 +1696,7 @@ impl SwapSession {
 
         let target_faces = self.detector.detect(array, 0.5, 0.4)?;
         if target_faces.is_empty() {
-            img_io::save_image(&rgb_img, frame_out)?;
+            // Nothing to swap: the caller writes the array back unchanged.
             return Ok(0);
         }
 
@@ -1726,7 +1726,7 @@ impl SwapSession {
         };
 
         if pairs.is_empty() {
-            img_io::save_image(&rgb_img, frame_out)?;
+            // Nothing to swap: the caller writes the array back unchanged.
             return Ok(0);
         }
 
