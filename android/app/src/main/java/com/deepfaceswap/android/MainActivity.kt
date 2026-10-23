@@ -1084,8 +1084,14 @@ class MainActivity : Activity() {
 
         col.addView(homeSection("Cut and erase"))
         col.addView(homeRow(
-            homeTile(R.drawable.ic_person, "Cut out", "Drop the background", false) {
-                notYet("Cut out")
+            homeTile(R.drawable.ic_person, "Cut out", "Drop the background", true) {
+                startActivity(
+                    ToolActivity.intent(
+                        this@MainActivity, "cutout", "Cut out",
+                        "Drop the background and keep the subject.",
+                        ModelManager.BIREFNET_FILE, 1,
+                    ),
+                )
             },
             homeTile(R.drawable.ic_image, "Swap background", "Put the subject elsewhere", false) {
                 notYet("Swap background")

@@ -11,6 +11,7 @@
 
 pub mod edit;
 pub mod image2image;
+pub mod segmentation;
 pub mod upscale;
 
 use crate::types::{FaceSwapError, Result};
@@ -47,6 +48,20 @@ pub struct ToolSpec {
 ///
 /// Adding one means adding an entry here and an arm in `run`, nothing else.
 pub const TOOLS: &[ToolSpec] = &[
+ToolSpec {
+    id: "cutout",
+    name: "Cut out",
+    category: "Cut",
+    blurb: "Drop the background and keep the subject.",
+    model: ToolModel {
+        file: "birefnet_lite_512.onnx",
+        url: "https://huggingface.co/studioludens/birefnet-lite-512/resolve/main/onnx/model_fp16.onnx",
+        sha256: "",
+        bytes: 98_500_000,
+        license: "MIT",
+    },
+    scale: 1,
+},
 ToolSpec {
     id: "denoise",
     name: "Denoise",
@@ -126,6 +141,7 @@ impl ToolSession {
         let session = match tool_id {
             "upscale" => upscale::load(model_path)?,
             "denoise" | "dejpeg" => image2image::load(model_path)?,
+            "cutout" => segmentation::load(model_path)?,
             other => {
                 return Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}")))
             }
@@ -146,6 +162,8 @@ impl ToolSession {
             "upscale" => upscale::run(&mut self.session, image),
             // One runner, because these differ only in which weights they loaded.
             "denoise" | "dejpeg" => image2image::run(&mut self.session, image),
+            // Returns RGBA, not RGB: the mask becomes the alpha channel.
+            "cutout" => segmentation::matte(&mut self.session, image),
             other => Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}"))),
         }
     }

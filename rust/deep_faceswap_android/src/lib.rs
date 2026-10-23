@@ -873,14 +873,16 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_runToolNative(
             .ok_or_else(|| "the tool failed to load".to_string())?;
         let out = held.run(&image).map_err(|e| format!("{e}"))?;
 
-        let (out_h, out_w, _) = out.dim();
+        let (out_h, out_w, channels) = out.dim();
         let mut bytes = Vec::with_capacity(out_h * out_w * 4);
         for y in 0..out_h {
             for x in 0..out_w {
                 bytes.push(out[[y, x, 0]]);
                 bytes.push(out[[y, x, 1]]);
                 bytes.push(out[[y, x, 2]]);
-                bytes.push(255);
+                // Segmentation hands back an alpha channel; every other tool is
+                // opaque. Both travel the same path.
+                bytes.push(if channels >= 4 { out[[y, x, 3]] } else { 255 });
             }
         }
         Ok::<Vec<u8>, String>(bytes)
