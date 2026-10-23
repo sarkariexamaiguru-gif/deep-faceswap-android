@@ -1,5 +1,7 @@
 package com.deepfaceswap.android
 
+import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -15,8 +17,6 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -34,7 +34,7 @@ import java.nio.ByteBuffer
  * to be rebuilt around a tool grid; putting this behind an intent now means it
  * works today and survives that rebuild untouched.
  */
-class EditActivity : AppCompatActivity() {
+class EditActivity : Activity() {
 
     private var source: Bitmap? = null
     private var preview: Bitmap? = null
@@ -56,10 +56,24 @@ class EditActivity : AppCompatActivity() {
     /** Longest edge of the working copy. Small enough to feel instant. */
     private val previewEdge = 720
 
-    private val picker =
-        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-            uri?.let { load(it) }
+    private val pickRequest = 7301
+
+    private fun choosePhoto() {
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "image/*"
+            },
+            pickRequest,
+        )
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == pickRequest && resultCode == RESULT_OK) {
+            data?.data?.let { load(it) }
         }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,7 +93,7 @@ class EditActivity : AppCompatActivity() {
             label("Edit", 20f, "#0E1424", bold = true),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        header.addView(button("Choose") { picker.launch("image/*") })
+        header.addView(button("Choose") { choosePhoto() })
         header.addView(space(8))
         header.addView(button("Save") { save() })
         root.addView(header)
