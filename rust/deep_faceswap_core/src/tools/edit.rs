@@ -40,6 +40,9 @@ pub struct EditParams {
     pub mono: bool,
     /// Stretch each channel to its own range first.
     pub auto_colour: bool,
+    /// A look: 0 is none, the rest are the one-tap filters. Applied after the
+    /// sliders and before mono, so a look never fights the controls.
+    pub look: u32,
     /// Exact output size. Zero means leave it.
     pub resize_w: u32,
     pub resize_h: u32,
@@ -62,6 +65,7 @@ impl Default for EditParams {
             sharpen: 0.0,
             mono: false,
             auto_colour: false,
+            look: 0,
             resize_w: 0,
             resize_h: 0,
         }
@@ -92,6 +96,9 @@ pub fn apply(image: &Array3<u8>, params: &EditParams) -> Result<Array3<u8>> {
         || params.temperature != 0.0
     {
         out = grade(&out, params);
+    }
+    if params.look > 0 {
+        out = look(&out, params.look);
     }
     if params.sharpen > 0.0 {
         out = unsharp(&out, params.sharpen.clamp(0.0, 1.0));
@@ -263,6 +270,160 @@ fn grade(image: &Array3<u8>, p: &EditParams) -> Array3<u8> {
         }
     }
     out
+}
+
+/// The names, in index order. Index 0 is no look.
+pub const LOOK_NAMES: &[&str] = &[
+    "Original", "Vivid", "Warm", "Cool", "Fade", "Vintage", "Sepia", "Dramatic",
+    "Film", "Punch", "Matte", "Noir", "Golden", "Forest",
+];
+
+/// One-tap looks.
+///
+/// All arithmetic - no model, no download, milliseconds. This is the part of an
+/// editor that people actually reach for, and it costs nothing to run.
+fn look(image: &Array3<u8>, index: u32) -> Array3<u8> {
+    let (h, w, _) = image.dim();
+    let mut out = Array3::<u8>::zeros((h, w, 3));
+
+    for y in 0..h {
+        for x in 0..w {
+            let mut r = image[[y, x, 0]] as f32;
+            let mut g = image[[y, x, 1]] as f32;
+            let mut b = image[[y, x, 2]] as f32;
+
+            match index {
+                // Vivid: more colour, a little more snap.
+                1 => {
+                    (r, g, b) = saturate(r, g, b, 1.35);
+                    (r, g, b) = contrast(r, g, b, 1.12);
+                }
+                // Warm: push red, pull blue.
+                2 => {
+                    r += 16.0;
+                    g += 5.0;
+                    b -= 14.0;
+                    (r, g, b) = saturate(r, g, b, 1.08);
+                }
+                // Cool: the other way.
+                3 => {
+                    r -= 12.0;
+                    g += 2.0;
+                    b += 18.0;
+                }
+                // Fade: lift the blacks and take the colour down.
+                4 => {
+                    (r, g, b) = lift(r, g, b, 30.0);
+                    (r, g, b) = contrast(r, g, b, 0.88);
+                    (r, g, b) = saturate(r, g, b, 0.82);
+                }
+                // Vintage: fade, warmth, and a touch of yellow.
+                5 => {
+                    (r, g, b) = lift(r, g, b, 26.0);
+                    (r, g, b) = contrast(r, g, b, 0.9);
+                    (r, g, b) = saturate(r, g, b, 0.75);
+                    r += 12.0;
+                    g += 6.0;
+                    b -= 10.0;
+                }
+                // Sepia: the classic matrix.
+                6 => {
+                    let (sr, sg, sb) = (
+                        0.393 * r + 0.769 * g + 0.189 * b,
+                        0.349 * r + 0.686 * g + 0.168 * b,
+                        0.272 * r + 0.534 * g + 0.131 * b,
+                    );
+                    r = sr;
+                    g = sg;
+                    b = sb;
+                }
+                // Dramatic: heavy contrast, colour pulled back.
+                7 => {
+                    (r, g, b) = contrast(r, g, b, 1.45);
+                    (r, g, b) = saturate(r, g, b, 0.7);
+                }
+                // Film: lifted blacks, slightly green in the shadows.
+                8 => {
+                    (r, g, b) = lift(r, g, b, 22.0);
+                    (r, g, b) = contrast(r, g, b, 1.05);
+                    g += 5.0;
+                    b += 3.0;
+                }
+                // Punch: the loud one.
+                9 => {
+                    (r, g, b) = contrast(r, g, b, 1.3);
+                    (r, g, b) = saturate(r, g, b, 1.5);
+                }
+                // Matte: flat and muted.
+                10 => {
+                    (r, g, b) = lift(r, g, b, 38.0);
+                    (r, g, b) = contrast(r, g, b, 0.8);
+                    (r, g, b) = saturate(r, g, b, 0.85);
+                }
+                // Noir: black and white, high contrast.
+                11 => {
+                    (r, g, b) = contrast(r, g, b, 1.4);
+                    let luma = luma_of(r, g, b);
+                    r = luma;
+                    g = luma;
+                    b = luma;
+                }
+                // Golden: warm highlights.
+                12 => {
+                    r += 22.0;
+                    g += 12.0;
+                    b -= 16.0;
+                    (r, g, b) = contrast(r, g, b, 1.06);
+                }
+                // Forest: cool and green.
+                13 => {
+                    g += 14.0;
+                    b += 6.0;
+                    r -= 14.0;
+                    (r, g, b) = saturate(r, g, b, 0.92);
+                }
+                _ => {}
+            }
+
+            out[[y, x, 0]] = r.clamp(0.0, 255.0) as u8;
+            out[[y, x, 1]] = g.clamp(0.0, 255.0) as u8;
+            out[[y, x, 2]] = b.clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
+}
+
+fn luma_of(r: f32, g: f32, b: f32) -> f32 {
+    0.299 * r + 0.587 * g + 0.114 * b
+}
+
+/// Pull towards or away from grey.
+fn saturate(r: f32, g: f32, b: f32, amount: f32) -> (f32, f32, f32) {
+    let luma = luma_of(r, g, b);
+    (
+        luma + (r - luma) * amount,
+        luma + (g - luma) * amount,
+        luma + (b - luma) * amount,
+    )
+}
+
+/// Pivot on mid grey.
+fn contrast(r: f32, g: f32, b: f32, amount: f32) -> (f32, f32, f32) {
+    (
+        (r - 128.0) * amount + 128.0,
+        (g - 128.0) * amount + 128.0,
+        (b - 128.0) * amount + 128.0,
+    )
+}
+
+/// Raise the floor, which is what makes a fade look like a fade.
+fn lift(r: f32, g: f32, b: f32, amount: f32) -> (f32, f32, f32) {
+    let f = amount / 255.0;
+    (
+        r * (1.0 - f) + amount,
+        g * (1.0 - f) + amount,
+        b * (1.0 - f) + amount,
+    )
 }
 
 /// Unsharp mask: the original plus a multiple of the difference from a blur.

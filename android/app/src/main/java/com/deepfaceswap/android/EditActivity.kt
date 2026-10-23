@@ -47,11 +47,13 @@ class EditActivity : Activity() {
     private var sharpen = 0f
     private var mono = false
     private var autoColour = false
+    private var look = 0
     private var rotation = 0
     private var flipH = false
 
     private lateinit var previewView: ImageView
     private lateinit var statusView: TextView
+    private lateinit var stripRow: LinearLayout
 
     /** Longest edge of the working copy. Small enough to feel instant. */
     private val previewEdge = 720
@@ -113,6 +115,24 @@ class EditActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
             ).apply { topMargin = dp(10); bottomMargin = dp(10) },
         )
+
+        // ---- looks
+        root.addView(TextView(this).apply {
+            text = "Looks"
+            textSize = 11.5f
+            setTextColor(Color.parseColor("#4E5C7C"))
+        })
+        stripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(
+            android.widget.HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(stripRow)
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) },
+        )
+        buildLooks()
 
         // ---- one-tap geometry and looks
         val quick = LinearLayout(this).apply {
@@ -179,6 +199,7 @@ class EditActivity : Activity() {
         put("sharpen", sharpen.toDouble())
         put("mono", mono)
         put("auto_colour", autoColour)
+        put("look", look)
         put("rotate", rotation)
         put("flip_h", flipH)
     }.toString()
@@ -210,9 +231,39 @@ class EditActivity : Activity() {
     private fun reset() {
         brightness = 0f; contrast = 0f; saturation = 0f
         temperature = 0f; sharpen = 0f
-        mono = false; autoColour = false; rotation = 0; flipH = false
+        mono = false; autoColour = false; rotation = 0; flipH = false; look = 0
         // Rebuild the sliders so their thumbs match the values again.
         recreate()
+    }
+
+    /** The looks, in the same order as the engine's table. */
+    private val looks = listOf(
+        "Original", "Vivid", "Warm", "Cool", "Fade", "Vintage", "Sepia",
+        "Dramatic", "Film", "Punch", "Matte", "Noir", "Golden", "Forest",
+    )
+
+    private fun buildLooks() {
+        stripRow.removeAllViews()
+        looks.forEachIndexed { index, name ->
+            stripRow.addView(TextView(this).apply {
+                text = name
+                textSize = 12f
+                setPadding(dp(14), dp(9), dp(14), dp(9))
+                val on = index == look
+                setTextColor(if (on) Color.WHITE else Color.parseColor("#4E5C7C"))
+                setBackgroundColor(
+                    if (on) Color.parseColor("#1677FF") else Color.parseColor("#FFFFFF"),
+                )
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dp(8) }
+                setOnClickListener {
+                    look = index
+                    buildLooks()
+                    render()
+                }
+            })
+        }
     }
 
     // ---------------------------------------------------------------- save --

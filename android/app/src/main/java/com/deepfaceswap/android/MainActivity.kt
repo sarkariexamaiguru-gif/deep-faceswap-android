@@ -1132,7 +1132,9 @@ class MainActivity : Activity() {
             },
         ))
         col.addView(homeRow(
-            homeTile(R.drawable.ic_filter, "Filters", "One-tap looks", false) { notYet("Filters") },
+            homeTile(R.drawable.ic_filter, "Filters", "13 one-tap looks", true) {
+                startActivity(Intent(this@MainActivity, EditActivity::class.java))
+            },
             homeTile(R.drawable.ic_sort, "Straighten", "Level a tilted horizon", true) {
                 startActivity(Intent(this@MainActivity, EditActivity::class.java))
             },
