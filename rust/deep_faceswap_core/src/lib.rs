@@ -24,6 +24,7 @@ pub mod mouth_mask;
 pub mod multi_face;
 pub mod recognition;
 pub mod swap;
+pub mod tools;
 pub mod swapper;
 pub mod utils;
 pub mod video;

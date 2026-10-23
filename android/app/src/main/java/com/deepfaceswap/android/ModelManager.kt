@@ -27,6 +27,9 @@ import java.util.zip.ZipInputStream
 class ModelManager(private val context: Context) {
 
     val modelsDir = File(context.filesDir, "models")
+
+    /** Models that belong to a tool rather than to the swapper. */
+    val toolsDir = File(modelsDir, "tools")
     val buffaloDir = File(modelsDir, "buffalo_l")
 
     /** Where a model comes from. */
@@ -95,7 +98,10 @@ class ModelManager(private val context: Context) {
         Model("Swapper · UniFace 256", UNIFACE, modelsDir, false, Source.URL,
             url = UNIFACE_URL, approxSize = "388 MB", licence = "Unknown - check before use"),
         Model("Enhancer · GFPGAN 1.4", ENHANCER_FILE, modelsDir, false, Source.URL,
-            url = ENHANCER_URL, approxSize = "340 MB", licence = "Apache-2.0"),
+            url = ENHANCER_URL, approxSize = "340 MB", licence = "Apache-2.0"),        Model(
+            "Upscaler x4", UPSCALE_FILE, toolsDir, false, Source.URL,
+            url = UPSCALE_URL, approxSize = "5 MB", licence = "BSD-3-Clause",
+        ),
     )
 
     // Paths handed to the JNI bridge.
@@ -412,6 +418,13 @@ class ModelManager(private val context: Context) {
         const val GHOST_CONVERTER = "arcface_converter_ghost.onnx"
         const val UNIFACE = "uniface_256.onnx"
         const val ENHANCER_FILE = "GFPGANv1.4.onnx"
+
+        /** The upscaler behind the Upscale tool. */
+        const val UPSCALE_FILE = "realesr-general-x4v3.onnx"
+
+        private const val UPSCALE_URL =
+            "https://huggingface.co/CoderViking/realesr-general-x4v3-onnx/resolve/main/" +
+                "realesr-general-x4v3.onnx"
 
         private const val BUFFALO_ZIP_URL =
             "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"

@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use deep_faceswap_core::swap::{SwapOptions, SwapSession, SwapStage, MAX_PIXEL_BOOST};
+use deep_faceswap_core::tools::{ToolSession, MAX_INPUT_EDGE, TOOLS};
+use ndarray::Array3;
 
 /// Latest progress stage, polled from Kotlin while the swap runs on a worker
 /// thread. `-1` means "no swap in flight".
@@ -717,6 +719,110 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
 
     match result {
         Ok(Ok((bytes, _faces))) => match env.byte_array_from_slice(&bytes) {
+            Ok(array) => array.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// The loaded tool model, kept between calls so a batch does not reload it.
+static TOOL_SESSION: Mutex<Option<ToolSession>> = Mutex::new(None);
+
+/// The tool registry, as JSON, so the app keeps no second copy of it.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_listToolsNative(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let payload = serde_json::json!({
+        "ok": true,
+        "tools": TOOLS,
+    })
+    .to_string();
+    to_jstring(&mut env, payload)
+}
+
+/// Run a tool over an RGBA image and hand back RGBA.
+///
+/// Returns null on failure; the reason is not carried on this path, so the
+/// caller should treat null as "it did not work" and re-run through the
+/// reporting path if it needs the detail.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_runToolNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    tool_id: JString,
+    model_path: JString,
+    width: jint,
+    height: jint,
+    rgba: JByteArray,
+) -> jbyteArray {
+    let id = jstring_to_string(&mut env, &tool_id);
+    let path = jstring_to_string(&mut env, &model_path);
+    let w = width.max(0) as usize;
+    let h = height.max(0) as usize;
+
+    let input = match env.convert_byte_array(&rgba) {
+        Ok(bytes) => bytes,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    if w == 0 || h == 0 || input.len() < w * h * 4 {
+        return std::ptr::null_mut();
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // A 4x pass over a large photo is not a question of patience: the result
+        // would not fit in memory at all. Refuse with the numbers rather than
+        // being killed part-way through.
+        if w > MAX_INPUT_EDGE || h > MAX_INPUT_EDGE {
+            return Err(format!(
+                "This image is {w} by {h}. Upscaling runs up to {MAX_INPUT_EDGE} pixels on a side, because 4x of anything larger will not fit in memory. Crop it first."
+            ));
+        }
+
+        let mut image = Array3::<u8>::zeros((h, w, 3));
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                image[[y, x, 0]] = input[i];
+                image[[y, x, 1]] = input[i + 1];
+                image[[y, x, 2]] = input[i + 2];
+            }
+        }
+
+        let mut guard = TOOL_SESSION
+            .lock()
+            .map_err(|_| "tool lock poisoned".to_string())?;
+        let stale = match guard.as_ref() {
+            Some(held) => held.tool_id() != id.as_str(),
+            None => true,
+        };
+        if stale {
+            let loaded =
+                ToolSession::load(&id, &path).map_err(|e| format!("{e}"))?;
+            *guard = Some(loaded);
+        }
+        let held = guard
+            .as_mut()
+            .ok_or_else(|| "the tool failed to load".to_string())?;
+        let out = held.run(&image).map_err(|e| format!("{e}"))?;
+
+        let (out_h, out_w, _) = out.dim();
+        let mut bytes = Vec::with_capacity(out_h * out_w * 4);
+        for y in 0..out_h {
+            for x in 0..out_w {
+                bytes.push(out[[y, x, 0]]);
+                bytes.push(out[[y, x, 1]]);
+                bytes.push(out[[y, x, 2]]);
+                bytes.push(255);
+            }
+        }
+        Ok::<Vec<u8>, String>(bytes)
+    }));
+
+    match result {
+        Ok(Ok(bytes)) => match env.byte_array_from_slice(&bytes) {
             Ok(array) => array.into_raw(),
             Err(_) => std::ptr::null_mut(),
         },

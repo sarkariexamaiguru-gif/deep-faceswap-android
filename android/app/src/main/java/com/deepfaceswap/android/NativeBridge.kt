@@ -444,6 +444,36 @@ object NativeBridge {
         )
     }.getOrNull()
 
+    /** The tool registry, exactly as the engine defines it. */
+    fun listTools(): String = runCatching { listToolsNative() }
+        .getOrDefault("{\"ok\":false}")
+
+    /**
+     * Run a tool over an RGBA image and get RGBA back.
+     *
+     * Null means the tool refused or failed - the engine caps upscaling by size,
+     * for instance, rather than being killed part-way through.
+     */
+    fun runTool(
+        toolId: String,
+        modelPath: String,
+        width: Int,
+        height: Int,
+        rgba: ByteArray,
+    ): ByteArray? = runCatching {
+        runToolNative(toolId, modelPath, width, height, rgba)
+    }.getOrNull()
+
+    private external fun listToolsNative(): String
+
+    private external fun runToolNative(
+        toolId: String,
+        modelPath: String,
+        width: Int,
+        height: Int,
+        rgba: ByteArray,
+    ): ByteArray?
+
     /**
      * Colour matching for the next swap.
      *
