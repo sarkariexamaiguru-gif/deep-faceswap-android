@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.media.MediaMetadataRetriever
@@ -209,46 +210,96 @@ class MainActivity : Activity() {
 
     // --------------------------------------------------------------- shell
 
+    /**
+     * The LabPic banner.
+     *
+     * It used to be a flat row: a logo, a wordmark, a pill and three icon
+     * buttons competing for the same line. It is one gradient card now, with the
+     * mark and the name inside it and the actions reduced to two glass buttons.
+     * The Pro crown is gone - there is no paid tier, so a crown button was an
+     * advertisement for something that does not exist.
+     */
     private fun buildHeader(): View {
-        val row = LinearLayout(this).apply {
+        val wrap = FrameLayout(this).apply {
+            setPadding(dp(18), dp(10), dp(18), dp(4))
+        }
+        val banner = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(4))
+            background = getDrawable(R.drawable.bg_banner)
+            elevation = dp(5).toFloat()
+            setPadding(dp(15), dp(15), dp(11), dp(15))
         }
 
-        row.addView(RoopUi.markTile(this))
+        banner.addView(FrameLayout(this).apply {
+            background = getDrawable(R.drawable.bg_glass_tile)
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_flask, 25,
+                R.color.surface_solid).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(25), dp(25)).apply {
+                    gravity = Gravity.CENTER
+                }
+            })
+        })
 
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 0, 0)
+                ViewGroup.LayoutParams.WRAP_CONTENT, 13, 0, 0, 0)
         }
-        val brandTop = LinearLayout(this).apply {
+        brand.addView(TextView(this).apply {
+            text = getString(R.string.app_name)
+            textSize = 21f
+            setTextColor(getColor(R.color.surface_solid))
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        val sub = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        brandTop.addView(RoopUi.wordmark(this@MainActivity))
-        brandTop.addView(RoopUi.pill(
-            this@MainActivity, getString(R.string.private_label),
-            R.drawable.bg_pill_lavender, R.color.violet,
-        ).apply {
+        sub.addView(TextView(this).apply {
+            text = getString(R.string.tagline)
+            textSize = 11.5f
+            setTextColor(0xCCFFFFFF.toInt())
+        })
+        sub.addView(TextView(this).apply {
+            text = getString(R.string.private_label)
+            textSize = 10f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(getColor(R.color.surface_solid))
+            background = getDrawable(R.drawable.bg_glass_circle)
+            setPadding(dp(9), dp(3), dp(9), dp(3))
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 8, 0, 0, 0)
-            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_lock, 0, 0, 0)
-            compoundDrawablePadding = dp(4)
-            setPadding(dp(8), dp(4), dp(9), dp(4))
         })
-        brand.addView(brandTop)
-        brand.addView(RoopUi.meta(this, getString(R.string.tagline)).apply {
-            maxLines = 1
-        })
-        row.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        brand.addView(sub)
+        banner.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        row.addView(iconButton(R.drawable.ic_crown, "LabPic Pro", R.drawable.bg_crown) { showPro() })
-        row.addView(iconButton(R.drawable.ic_settings, "Settings") { show("settings") })
-        row.addView(iconButton(R.drawable.ic_dots, "More options") { showOverflow() })
-        return row
+        banner.addView(glassButton(R.drawable.ic_settings, "Settings") { show("settings") })
+        banner.addView(glassButton(R.drawable.ic_dots, "More options") { showOverflow() })
+
+        wrap.addView(banner)
+        return wrap
     }
+
+    /** A translucent round button, for use on the banner. */
+    private fun glassButton(iconRes: Int, description: String, onClick: () -> Unit): View =
+        FrameLayout(this).apply {
+            background = getDrawable(R.drawable.bg_glass_circle)
+            layoutParams = LinearLayout.LayoutParams(dp(38), dp(38)).apply {
+                marginStart = dp(7)
+            }
+            isClickable = true
+            contentDescription = description
+            addView(RoopUi.iconView(this@MainActivity, iconRes, 19, R.color.surface_solid)
+                .apply {
+                    layoutParams = FrameLayout.LayoutParams(dp(19), dp(19)).apply {
+                        gravity = Gravity.CENTER
+                    }
+                })
+            setOnClickListener { onClick() }
+            RoopUi.pressScale(this)
+        }
 
     private fun iconButton(
         iconRes: Int,
@@ -1032,40 +1083,61 @@ class MainActivity : Activity() {
     }
 
     private fun homeSection(title: String): View =
-        RoopUi.text(this, title.uppercase(), 11f, R.color.ink_muted, 1).apply {
+        RoopUi.text(this, title.uppercase(), 11.5f, R.color.blue, 2).apply {
+            letterSpacing = 0.1f
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 2, 16, 0, 8)
+                ViewGroup.LayoutParams.WRAP_CONTENT, 4, 20, 0, 9)
         }
 
     private fun homeRow(left: View, right: View?): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(left, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(left, RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         row.addView(android.view.View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(12), 1)
+            layoutParams = LinearLayout.LayoutParams(dp(13), 1)
         })
         if (right != null) {
-            row.addView(right, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(right, RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         } else {
             row.addView(android.view.View(this),
-                RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         }
         return row
     }
 
     private fun homeTile(iconRes: Int, title: String, subtitle: String, ready: Boolean,
                          onClick: () -> Unit): View {
-        val card = RoopUi.card(this)
-        card.addView(RoopUi.softTile(this, iconRes,
-            if (ready) R.color.blue else R.color.ink_muted))
+        val card = RoopUi.card(this).apply {
+            setPadding(dp(16), dp(16), dp(16), dp(15))
+            // Even heights across a row, so the grid reads as a grid.
+            minimumHeight = dp(158)
+        }
+
+        // Ready tools get the gradient tile, so what works is obvious at a
+        // glance without reading a single label.
+        card.addView(
+            if (ready) RoopUi.gradientTile(this, iconRes)
+            else RoopUi.softTile(this, iconRes, R.color.ink_muted),
+        )
         card.addView(RoopUi.cardTitle(this, title).apply {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0)
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0)
         })
-        card.addView(RoopUi.meta(this, subtitle).apply { minLines = 2 })
-        card.addView(RoopUi.text(this, if (ready) "Ready" else "Coming", 10f,
-            if (ready) R.color.success else R.color.ink_muted, 1).apply {
+        card.addView(RoopUi.secondary(this, subtitle).apply {
+            minLines = 2
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0)
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 2, 0, 0)
+        })
+        card.addView(TextView(this).apply {
+            text = if (ready) "Ready" else "Coming"
+            textSize = 10.5f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(getColor(if (ready) R.color.success else R.color.ink_muted))
+            background = getDrawable(
+                if (ready) R.drawable.bg_chip_ready else R.drawable.bg_chip_coming,
+            )
+            setPadding(dp(11), dp(4), dp(11), dp(4))
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0)
         })
         card.isClickable = true
         card.contentDescription = title
