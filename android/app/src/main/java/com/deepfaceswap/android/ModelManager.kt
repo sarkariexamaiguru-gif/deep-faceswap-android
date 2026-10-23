@@ -102,6 +102,26 @@ class ModelManager(private val context: Context) {
             "Upscaler x4", UPSCALE_FILE, toolsDir, false, Source.URL,
             url = UPSCALE_URL, approxSize = "5 MB", licence = "BSD-3-Clause",
         ),
+        Model(
+            "Background cutter", BIREFNET_FILE, toolsDir, false, Source.URL,
+            url = BIREFNET_URL, approxSize = "94 MB", licence = "MIT",
+        ),
+        Model(
+            "Object eraser", LAMA_FILE, toolsDir, false, Source.URL,
+            url = LAMA_URL, approxSize = "200 MB", licence = "Apache-2.0",
+        ),
+        Model(
+            "De-JPEG", FBCNN_FILE, toolsDir, false, Source.URL,
+            url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
+        ),
+        Model(
+            "Select · encoder", MOBILESAM_ENCODER_FILE, toolsDir, false, Source.URL,
+            url = MOBILESAM_ENCODER_URL, approxSize = "27 MB", licence = "Apache-2.0",
+        ),
+        Model(
+            "Select · decoder", MOBILESAM_DECODER_FILE, toolsDir, false, Source.URL,
+            url = MOBILESAM_DECODER_URL, approxSize = "16 MB", licence = "Apache-2.0",
+        ),
     )
 
     // Paths handed to the JNI bridge.
@@ -421,6 +441,38 @@ class ModelManager(private val context: Context) {
 
         /** The upscaler behind the Upscale tool. */
         const val UPSCALE_FILE = "realesr-general-x4v3.onnx"
+
+        /** Background cutter. */
+        const val BIREFNET_FILE = "birefnet_lite_512.onnx"
+
+        /** Object eraser. */
+        const val LAMA_FILE = "lama_fp32.onnx"
+
+        /** JPEG artifact remover. */
+        const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
+
+        /** Interactive selection, split into the two halves the model ships as. */
+        const val MOBILESAM_ENCODER_FILE = "mobile_sam_image_encoder.onnx"
+        const val MOBILESAM_DECODER_FILE = "sam_mask_decoder_single.onnx"
+
+        // Sources below are the upstream or a documented re-export. Each carries
+        // the licence of its weights, not of the repository that hosts it.
+        private const val BIREFNET_URL =
+            "https://huggingface.co/studioludens/birefnet-lite-512/resolve/main/onnx/" +
+                "model_fp16.onnx"
+
+        private const val LAMA_URL =
+            "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx"
+
+        private const val FBCNN_URL =
+            "https://huggingface.co/colpona/dejpeg-models/resolve/main/fbcnn/" +
+                "fbcnn_color_fp16.onnx"
+
+        private const val MOBILESAM_ENCODER_URL =
+            "https://huggingface.co/Acly/MobileSAM/resolve/main/mobile_sam_image_encoder.onnx"
+
+        private const val MOBILESAM_DECODER_URL =
+            "https://huggingface.co/Acly/MobileSAM/resolve/main/sam_mask_decoder_single.onnx"
 
         private const val UPSCALE_URL =
             "https://huggingface.co/CoderViking/realesr-general-x4v3-onnx/resolve/main/" +

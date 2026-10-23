@@ -1056,7 +1056,13 @@ class MainActivity : Activity() {
             homeTile(R.drawable.ic_filter, "Denoise", "Grain and phone noise", false) {
                 notYet("Denoise")
             },
-            homeTile(R.drawable.ic_star, "Restore", "Old photos, faces and detail", false) {
+            homeTile(R.drawable.ic_chip, "Deblock", "JPEG squares, adjustable", false) {
+                notYet("Deblock")
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_star, "Sharpen", "Crisper edges", false) { notYet("Sharpen") },
+            homeTile(R.drawable.ic_heart, "Restore", "Old photos, faces and detail", false) {
                 notYet("Restore")
             },
         ))
@@ -1066,17 +1072,81 @@ class MainActivity : Activity() {
             homeTile(R.drawable.ic_person, "Cut out", "Drop the background", false) {
                 notYet("Cut out")
             },
-            homeTile(R.drawable.ic_trash, "Erase", "Paint it out, it fills in", false) {
-                notYet("Erase")
-            },
-        ))
-        col.addView(homeRow(
             homeTile(R.drawable.ic_image, "Swap background", "Put the subject elsewhere", false) {
                 notYet("Swap background")
             },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_trash, "Erase", "Paint it out, it fills in", false) {
+                notYet("Erase")
+            },
+            homeTile(R.drawable.ic_scan, "Select", "Tap an object to mask it", false) {
+                notYet("Select")
+            },
+        ))
+
+        col.addView(homeSection("Colour"))
+        col.addView(homeRow(
             homeTile(R.drawable.ic_palette, "Colourise", "Black and white to colour", false) {
                 notYet("Colourise")
             },
+            homeTile(R.drawable.ic_chip, "Auto colour", "Fix a cast, lift a dull shot", false) {
+                notYet("Auto colour")
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_shield, "Colour match", "Blend a face into its frame", true) {
+                show("swap")
+            },
+            null,
+        ))
+
+        col.addView(homeSection("Change"))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_sort, "Crop and rotate", "Frame it, level it", true) {
+                startActivity(Intent(this@MainActivity, EditActivity::class.java))
+            },
+            homeTile(R.drawable.ic_cube, "Resize", "Exact pixel dimensions", true) {
+                startActivity(Intent(this@MainActivity, EditActivity::class.java))
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_filter, "Filters", "One-tap looks", false) { notYet("Filters") },
+            homeTile(R.drawable.ic_sort, "Straighten", "Level a tilted horizon", true) {
+                startActivity(Intent(this@MainActivity, EditActivity::class.java))
+            },
+        ))
+
+        col.addView(homeSection("People"))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_person, "Skin", "Smooth tone, keep texture", false) {
+                notYet("Skin")
+            },
+            homeTile(R.drawable.ic_scan, "Eyes", "Brighten and sharpen", false) { notYet("Eyes") },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_star, "Teeth", "Whiten, without going blue", false) {
+                notYet("Teeth")
+            },
+            homeTile(R.drawable.ic_sliders, "Reshape", "Jaw, nose, waist, height", false) {
+                notYet("Reshape")
+            },
+        ))
+
+        col.addView(homeSection("Video"))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_hd, "Video upscale", "Upscale a whole clip", false) {
+                notYet("Video upscale")
+            },
+            homeTile(R.drawable.ic_video, "Video background", "Cut or swap a clip's backdrop", false) {
+                notYet("Video background")
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_gif, "GIF maker", "Turn frames into an animation", false) {
+                notYet("GIF maker")
+            },
+            null,
         ))
 
         return scrollPage(col)
