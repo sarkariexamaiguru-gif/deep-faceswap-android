@@ -74,6 +74,7 @@ object SwapBus {
             val pixelBoost: Int,
             val enhancerStrength: Float,
             val keepAudio: Boolean,
+            val colorMatch: Boolean,
             val originalPath: String,
             val modelLabel: String,
         ) : Job()
@@ -88,6 +89,7 @@ object SwapBus {
             val mappings: List<Pair<Int, Int>>,
             val animate: Boolean,
             val swapEveryFace: Boolean,
+            val colorMatch: Boolean,
             val originalPath: String,
             val modelLabel: String,
         ) : Job()

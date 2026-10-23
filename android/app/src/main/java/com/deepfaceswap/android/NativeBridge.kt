@@ -302,6 +302,8 @@ object NativeBridge {
         enhancerStrength: Float,
     ): String
 
+    private external fun setColorMatch(enabled: Boolean)
+
     private external fun sessionSwapFrameRaw(
         width: Int,
         height: Int,
@@ -387,6 +389,16 @@ object NativeBridge {
     ): ByteArray? = runCatching {
         sessionSwapFrameRaw(width, height, frame, mappings, useMouthMask, pixelBoost, enhancerStrength)
     }.getOrNull()
+
+    /**
+     * Colour matching for the next swap.
+     *
+     * Set once per job rather than threaded through every call, which keeps the
+     * native signatures stable.
+     */
+    fun setColorMatch(enabled: Boolean) {
+        runCatching { setColorMatch(enabled) }
+    }
 
     /** Release the session and free its models. Safe to call when none is open. */
     fun closeSession() {

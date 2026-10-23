@@ -11,6 +11,7 @@ use crate::swapper::FaceSwapper;
 use crate::types::{DetectedFace, FaceSwapError, Result, SourceFaceInfo};
 #[cfg(feature = "video")]
 use crate::types::ClusterMapping;
+use crate::utils::color;
 use crate::utils::image as img_io;
 use crate::utils::rgb;
 use crate::verbose::{
@@ -70,6 +71,8 @@ pub struct SwapOptions {
     pub pixel_boost: u32,
     /// How much of the restored face to keep: 0.0 untouched, 1.0 full restore.
     pub enhancer_strength: f32,
+    /// Match the swapped face's colour to the target's own skin tone and light.
+    pub color_match: bool,
 }
 
 impl Default for SwapOptions {
@@ -79,6 +82,7 @@ impl Default for SwapOptions {
             use_multi_face: false,
             pixel_boost: 1,
             enhancer_strength: 1.0,
+            color_match: true,
         }
     }
 }
@@ -204,6 +208,17 @@ pub fn swap_single_pair_opts(
             source_frame.as_ref(),
             grid,
         )?
+    };
+
+    // Colour match: the swapper brings its own lighting, so the pasted face can
+    // read as a different skin tone from the rest of the frame. Transferring the
+    // target face's colour statistics onto the swapped face is what makes the
+    // seam disappear. Arithmetic only - no model, no measurable cost.
+    let swapped_face = if opts.color_match {
+        log_additional!(EVENT_PASTE_BACK, "Matching the swapped face's colour");
+        color::color_transfer_lab(&swapped_face, &target_aligned.aligned_image)
+    } else {
+        swapped_face
     };
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");

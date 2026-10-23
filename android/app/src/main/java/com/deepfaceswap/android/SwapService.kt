@@ -81,6 +81,7 @@ class SwapService : Service() {
             )
         }
         notifyProgress()
+        NativeBridge.setColorMatch(job.colorMatch)
 
         val result = VideoSwap(this).swap(
             input = File(job.inputPath),
@@ -124,6 +125,7 @@ class SwapService : Service() {
             )
         }
         notifyProgress()
+        NativeBridge.setColorMatch(job.colorMatch)
 
         val ok = if (job.animate) {
             NativeBridge.swapAnimation(

@@ -43,6 +43,11 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("save_gallery", v).apply()
 
     /** Keep finished results in the in-app history. */
+    /** Match the swapped face's colour to the target's own skin tone. */
+    var colorMatch: Boolean
+        get() = sp.getBoolean("color_match", true)
+        set(value) = sp.edit().putBoolean("color_match", value).apply()
+
     var keepHistory: Boolean
         get() = sp.getBoolean("keep_history", true)
         set(v) = sp.edit().putBoolean("keep_history", v).apply()

@@ -381,6 +381,13 @@ class VideoSwap(private val context: Context) {
     // ----------------------------------------------------------- yuv <-> rgb --
 
     /** Convert a decoded YUV_420_888 image into an ARGB bitmap, honouring strides. */
+    /**
+     * YUV (as the decoder hands it over) to a bitmap.
+     *
+     * Each plane is bulk-copied into a ByteArray first: a Buffer.get per pixel
+     * is a virtual, bounds-checked call, and this loop runs over every pixel of
+     * every frame. Indexing an array is dramatically cheaper.
+     */
     private fun yuvToBitmap(image: android.media.Image): Bitmap {
         val width = image.width
         val height = image.height
@@ -388,23 +395,27 @@ class VideoSwap(private val context: Context) {
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
 
-        val yBuffer = yPlane.buffer
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
         val yRowStride = yPlane.rowStride
         val uvRowStride = uPlane.rowStride
         val uvPixelStride = uPlane.pixelStride
+
+        val yBytes = planeBytes(yPlane.buffer, yRowStride * height)
+        val uvNeeded = uvRowStride * (height / 2 + 1)
+        val uBytes = planeBytes(uPlane.buffer, uvNeeded)
+        val vBytes = planeBytes(vPlane.buffer, uvNeeded)
 
         val out = IntArray(width * height)
         var index = 0
         for (row in 0 until height) {
             val yRow = row * yRowStride
-            val uvRow = (row / 2) * uvRowStride
-            for (col in 0 until width) {
-                val y = (yBuffer.get(yRow + col).toInt() and 0xFF)
-                val uvCol = (col / 2) * uvPixelStride
-                val u = (uBuffer.get(uvRow + uvCol).toInt() and 0xFF) - 128
-                val v = (vBuffer.get(uvRow + uvCol).toInt() and 0xFF) - 128
+            val uvRow = (row shr 1) * uvRowStride
+            val yLimit = minOf(width, yBytes.size - yRow)
+            for (col in 0 until yLimit) {
+                val y = yBytes[yRow + col].toInt() and 0xFF
+                val uvCol = (col shr 1) * uvPixelStride
+                val uvIndex = uvRow + uvCol
+                val u = if (uvIndex < uBytes.size) (uBytes[uvIndex].toInt() and 0xFF) - 128 else 0
+                val v = if (uvIndex < vBytes.size) (vBytes[uvIndex].toInt() and 0xFF) - 128 else 0
 
                 val yf = (y - 16).coerceAtLeast(0) * 1.164f
                 val r = (yf + 1.596f * v).toInt().coerceIn(0, 255)
@@ -412,8 +423,18 @@ class VideoSwap(private val context: Context) {
                 val b = (yf + 2.017f * u).toInt().coerceIn(0, 255)
                 out[index++] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
+            // Anything the plane did not cover stays opaque black rather than
+            // leaving the row half-written.
+            index += width - yLimit
         }
         return Bitmap.createBitmap(out, width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    /** Copy a plane out of its buffer, padded so indexing can never overrun. */
+    private fun planeBytes(buffer: java.nio.ByteBuffer, needed: Int): ByteArray {
+        val raw = ByteArray(buffer.remaining())
+        buffer.get(raw)
+        return if (raw.size >= needed) raw else raw.copyOf(needed)
     }
 
     /**
@@ -422,6 +443,7 @@ class VideoSwap(private val context: Context) {
      * The chroma planes are subsampled 2x2, so each chroma sample averages its
      * four source pixels.
      */
+    /** Bitmap to YUV, writing into ByteArrays and copying each plane in once. */
     private fun bitmapToYuv(bitmap: Bitmap, image: android.media.Image) {
         val width = image.width
         val height = image.height
@@ -431,28 +453,32 @@ class VideoSwap(private val context: Context) {
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
-        val yBuffer = yPlane.buffer
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
         val yRowStride = yPlane.rowStride
         val uvRowStride = uPlane.rowStride
         val uvPixelStride = uPlane.pixelStride
 
+        val yBytes = ByteArray(yPlane.buffer.remaining())
+        val uBytes = ByteArray(uPlane.buffer.remaining())
+        val vBytes = ByteArray(vPlane.buffer.remaining())
+
         var index = 0
         for (row in 0 until height) {
             val yRow = row * yRowStride
-            for (col in 0 until width) {
+            val limit = minOf(width, yBytes.size - yRow)
+            for (col in 0 until limit) {
                 val colour = pixels[index++]
                 val r = (colour shr 16) and 0xFF
                 val g = (colour shr 8) and 0xFF
                 val b = colour and 0xFF
                 val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                yBuffer.put(yRow + col, y.coerceIn(0, 255).toByte())
+                yBytes[yRow + col] = y.coerceIn(0, 255).toByte()
             }
+            index += width - limit
         }
 
         var row = 0
         while (row < height) {
+            val uvRow = (row shr 1) * uvRowStride
             var col = 0
             while (col < width) {
                 var rSum = 0
@@ -478,14 +504,20 @@ class VideoSwap(private val context: Context) {
                     val b = bSum / count
                     val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val offset = (row / 2) * uvRowStride + (col / 2) * uvPixelStride
-                    uBuffer.put(offset, u.coerceIn(0, 255).toByte())
-                    vBuffer.put(offset, v.coerceIn(0, 255).toByte())
+                    val offset = uvRow + (col shr 1) * uvPixelStride
+                    if (offset < uBytes.size) {
+                        uBytes[offset] = u.coerceIn(0, 255).toByte()
+                        vBytes[offset] = v.coerceIn(0, 255).toByte()
+                    }
                 }
                 col += 2
             }
             row += 2
         }
+
+        yPlane.buffer.put(yBytes)
+        uPlane.buffer.put(uBytes)
+        vPlane.buffer.put(vBytes)
     }
 
     // -------------------------------------------------------------- plumbing --

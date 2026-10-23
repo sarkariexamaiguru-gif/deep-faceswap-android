@@ -639,8 +639,16 @@ class MainActivity : Activity() {
             this, R.drawable.ic_scan, "Face Blend", "Not available", enabled = false,
         ))
         swapTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_palette, "Color Match", "Not available", enabled = false,
-        ))
+            this, R.drawable.ic_palette, "Color Match", if (prefs.colorMatch) "On" else "Off",
+        ).apply {
+            setOnClickListener {
+                showSheet("Color Match", listOf("Off", "On"), if (prefs.colorMatch) 1 else 0,
+                    listOf("Leave the swapped face's own colour.",
+                        "Match it to the target's skin tone and light.")) { pick ->
+                    prefs.colorMatch = pick == 1; refreshSwap()
+                }
+            }
+        })
         swapTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_hd, "Restore Details", if (restoreOn) "On" else "Off",
             enabled = models.enhancerInstalled,
@@ -854,8 +862,16 @@ class MainActivity : Activity() {
             this, R.drawable.ic_shield, "Similarity", "Not available", enabled = false,
         ))
         vidTiles.addView(RoopUi.optionTile(
-            this, R.drawable.ic_palette, "Color Match", "Not available", enabled = false,
-        ))
+            this, R.drawable.ic_palette, "Color Match", if (prefs.colorMatch) "On" else "Off",
+        ).apply {
+            setOnClickListener {
+                showSheet("Color Match", listOf("Off", "On"), if (prefs.colorMatch) 1 else 0,
+                    listOf("Leave the swapped face's own colour.",
+                        "Match it to the target's skin tone and light.")) { pick ->
+                    prefs.colorMatch = pick == 1; refreshVideo()
+                }
+            }
+        })
         vidTiles.addView(RoopUi.optionTile(
             this, R.drawable.ic_volume, "Audio", if (vMute) "Mute" else "Keep original",
         ).apply {
@@ -1468,7 +1484,16 @@ class MainActivity : Activity() {
         oCard.addView(pairRow(restoreCell, strengthCell))
         oCard.addView(pairRow(
             RoopUi.settingCell(this, R.drawable.ic_sliders, "Face Blend", "Not available", enabled = false),
-            RoopUi.settingCell(this, R.drawable.ic_chip, "Color Match", "Not available", enabled = false),
+            RoopUi.settingCell(this, R.drawable.ic_chip, "Color Match",
+                if (prefs.colorMatch) "On" else "Off").apply {
+                setOnClickListener {
+                    showSheet("Color Match", listOf("Off", "On"), if (prefs.colorMatch) 1 else 0,
+                        listOf("Leave the swapped face's own colour.",
+                            "Match it to the target's skin tone and light.")) { pick ->
+                        prefs.colorMatch = pick == 1; renderSettings()
+                    }
+                }
+            },
         ))
         col.addView(oCard)
 
@@ -2045,6 +2070,7 @@ class MainActivity : Activity() {
                 pixelBoost = grid,
                 enhancerStrength = strength,
                 keepAudio = true,
+                colorMatch = prefs.colorMatch,
                 originalPath = target.absolutePath,
                 modelLabel = label,
             )
@@ -2059,6 +2085,7 @@ class MainActivity : Activity() {
                 mappings = if (manual) mappings.toList() else emptyList(),
                 animate = isAnimation(target.name),
                 swapEveryFace = faceMode == 1,
+                colorMatch = prefs.colorMatch,
                 originalPath = target.absolutePath,
                 modelLabel = label,
             )
@@ -2087,6 +2114,7 @@ class MainActivity : Activity() {
             pixelBoost = qualityGrid(),
             enhancerStrength = strength,
             keepAudio = !vMute,
+            colorMatch = prefs.colorMatch,
             originalPath = target.absolutePath,
             modelLabel = label,
         )
