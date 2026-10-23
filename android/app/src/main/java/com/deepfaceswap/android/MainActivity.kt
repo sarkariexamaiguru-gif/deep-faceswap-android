@@ -262,20 +262,16 @@ class MainActivity : Activity() {
             text = getString(R.string.tagline)
             textSize = 11.5f
             setTextColor(0xCCFFFFFF.toInt())
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
         })
-        sub.addView(TextView(this).apply {
-            text = getString(R.string.private_label)
-            textSize = 10f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(getColor(R.color.surface_solid))
-            background = getDrawable(R.drawable.bg_glass_circle)
-            setPadding(dp(9), dp(3), dp(9), dp(3))
-            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 8, 0, 0, 0)
-        })
+        // The Private pill used to sit here. A third button needs the width, and
+        // the same promise is already on Home in full - "Every tool runs on this
+        // phone. Nothing is uploaded." - so the pill was the one that could go.
         brand.addView(sub)
         banner.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
+        banner.addView(glassButton(R.drawable.ic_history, "History") { show("history") })
         banner.addView(glassButton(R.drawable.ic_settings, "Settings") { show("settings") })
         banner.addView(glassButton(R.drawable.ic_dots, "More options") { showOverflow() })
 
