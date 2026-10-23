@@ -115,6 +115,14 @@ class ModelManager(private val context: Context) {
             url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
         ),
         Model(
+            "Denoiser", SCUNET_FILE, toolsDir, false, Source.URL,
+            url = SCUNET_URL, approxSize = "38 MB", licence = "Apache-2.0",
+        ),
+        Model(
+            "De-JPEG · light", OMNI_FILE, toolsDir, false, Source.URL,
+            url = OMNI_URL, approxSize = "2.4 MB", licence = "Apache-2.0",
+        ),
+        Model(
             "Select · encoder", MOBILESAM_ENCODER_FILE, toolsDir, false, Source.URL,
             url = MOBILESAM_ENCODER_URL, approxSize = "27 MB", licence = "Apache-2.0",
         ),
@@ -451,6 +459,12 @@ class ModelManager(private val context: Context) {
         /** JPEG artifact remover. */
         const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
 
+        /** General colour denoiser. */
+        const val SCUNET_FILE = "scunet_color_real_gan_fp16.onnx"
+
+        /** A very small de-JPEG, for when the 137 MB one is overkill. */
+        const val OMNI_FILE = "1xDeJPG_OmniSR-fp16.onnx"
+
         /** Interactive selection, split into the two halves the model ships as. */
         const val MOBILESAM_ENCODER_FILE = "mobile_sam_image_encoder.onnx"
         const val MOBILESAM_DECODER_FILE = "sam_mask_decoder_single.onnx"
@@ -467,6 +481,13 @@ class ModelManager(private val context: Context) {
         private const val FBCNN_URL =
             "https://huggingface.co/colpona/dejpeg-models/resolve/main/fbcnn/" +
                 "fbcnn_color_fp16.onnx"
+
+        private const val SCUNET_URL =
+            "https://huggingface.co/colpona/dejpeg-models/resolve/main/scunet/" +
+                "scunet_color_real_gan_fp16.onnx"
+
+        private const val OMNI_URL =
+            "https://huggingface.co/colpona/dejpeg-models/resolve/main/1xDeJPG_OmniSR-fp16.onnx"
 
         private const val MOBILESAM_ENCODER_URL =
             "https://huggingface.co/Acly/MobileSAM/resolve/main/mobile_sam_image_encoder.onnx"

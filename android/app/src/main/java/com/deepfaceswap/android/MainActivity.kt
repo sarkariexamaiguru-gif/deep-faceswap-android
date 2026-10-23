@@ -158,6 +158,7 @@ class MainActivity : Activity() {
         screens["history"] = buildHistoryScreen().also { content.addView(it) }
         screens["settings"] = buildSettingsScreen().also { content.addView(it) }
         screens["tools"] = buildToolsScreen().also { content.addView(it) }
+        screens["models"] = buildModelsScreen().also { content.addView(it) }
 
         show("home")
     }
@@ -391,6 +392,7 @@ class MainActivity : Activity() {
             "video" to ("Video" to R.drawable.ic_video),
             "history" to ("History" to R.drawable.ic_history),
             "tools" to ("Tools" to R.drawable.ic_tools),
+            "models" to ("Models" to R.drawable.ic_cube),
             "settings" to ("Settings" to R.drawable.ic_settings),
         ).forEach { (key, spec) ->
             val (label, icon) = spec
@@ -434,6 +436,7 @@ class MainActivity : Activity() {
             "swap" -> refreshSwap()
             "video" -> refreshVideo()
             "tools" -> Unit
+            "models" -> Unit
         }
     }
 
@@ -1152,6 +1155,111 @@ class MainActivity : Activity() {
         ))
 
         return scrollPage(col)
+    }
+
+    /**
+     * Models: everything the app can run, in one list.
+     *
+     * Until now the only way to see them was a diagnostics sheet behind the
+     * Tools tab. This is the list itself - what is installed, what is not, what
+     * each costs in space, and the licence it carries.
+     */
+    private fun buildModelsScreen(): View {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(RoopUi.screenTitle(this, "Models"))
+        col.addView(RoopUi.body(this, "Everything the app can run. Each shows its size and its " +
+            "licence before you take it.").apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 4)
+        })
+
+        val all = models.models()
+        val installed = all.filter { it.installed }
+        val available = all.filter { !it.installed }
+
+        col.addView(homeSection("Installed (${installed.size})"))
+        installed.forEach { col.addView(modelRow(it)) }
+
+        col.addView(homeSection("Available (${available.size})"))
+        if (available.isEmpty()) {
+            col.addView(RoopUi.body(this, "Everything on this list is installed."))
+        } else {
+            available.forEach { col.addView(modelRow(it)) }
+        }
+
+        return scrollPage(col)
+    }
+
+    /** One model. Tapping a row that is not installed fetches it. */
+    private fun modelRow(model: ModelManager.Model): View {
+        val card = RoopUi.card(this)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(RoopUi.softTile(this, R.drawable.ic_cube,
+            if (model.installed) R.color.blue else R.color.ink_muted))
+
+        val text = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 0, 0)
+        }
+        text.addView(RoopUi.cardTitle(this, model.title))
+        val meta = RoopUi.meta(this, "${model.approxSize} · ${model.licence}")
+        text.addView(meta)
+        row.addView(text, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        val action = TextView(this).apply {
+            text = if (model.installed) "Installed" else "Get"
+            textSize = 11f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(getColor(if (model.installed) R.color.success else R.color.blue))
+            background = getDrawable(
+                if (model.installed) R.drawable.bg_chip_ready else R.drawable.bg_chip_coming,
+            )
+            setPadding(dp(11), dp(5), dp(11), dp(5))
+        }
+        row.addView(action)
+        card.addView(row)
+
+        if (!model.installed) {
+            card.isClickable = true
+            card.contentDescription = "Download ${model.title}"
+            card.setOnClickListener { fetchModel(model, meta, action) }
+            RoopUi.pressScale(card)
+        }
+        return card
+    }
+
+    private fun fetchModel(
+        model: ModelManager.Model,
+        meta: TextView,
+        action: TextView,
+    ) {
+        action.text = "…"
+        Thread {
+            runCatching {
+                models.download(model) { progress ->
+                    runOnUiThread {
+                        meta.text = "${progress.label} · ${progress.text}"
+                        action.text = when {
+                            progress.percent >= 0 -> "${progress.percent}%"
+                            progress.resuming -> "Resuming"
+                            else -> "…"
+                        }
+                    }
+                }
+            }
+            runOnUiThread {
+                if (model.installed) {
+                    meta.text = "${model.approxSize} · ${model.licence}"
+                    action.text = "Installed"
+                } else {
+                    action.text = "Retry"
+                }
+            }
+        }.start()
     }
 
     private fun homeSection(title: String): View =
