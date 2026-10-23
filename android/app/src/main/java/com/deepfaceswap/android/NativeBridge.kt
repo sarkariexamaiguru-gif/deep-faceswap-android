@@ -1,5 +1,10 @@
 package com.deepfaceswap.android
 
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
 /**
  * How many clones of the chosen model may run at once.
  *
@@ -7,10 +12,6 @@ package com.deepfaceswap.android
  * deliberately low - it mirrors the engine's own cap.
  */
 const val MAX_MODEL_CLONES = 4
-
-import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
 
 /**
  * Thin Kotlin wrapper over the Rust JNI bridge (`libdeep_faceswap_android.so`).
