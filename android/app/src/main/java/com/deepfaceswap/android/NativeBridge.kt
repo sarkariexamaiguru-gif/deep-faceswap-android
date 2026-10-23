@@ -444,6 +444,22 @@ object NativeBridge {
         )
     }.getOrNull()
 
+    /**
+     * Run the instant tools over RGBA and get RGBA back.
+     *
+     * No model, no session, nothing to load — these are pixel operations, so
+     * they return in milliseconds. Null means the engine refused.
+     */
+    fun editImage(rgba: ByteArray, width: Int, height: Int, paramsJson: String): ByteArray? =
+        runCatching { editImageNative(rgba, width, height, paramsJson) }.getOrNull()
+
+    private external fun editImageNative(
+        rgba: ByteArray,
+        width: Int,
+        height: Int,
+        paramsJson: String,
+    ): ByteArray?
+
     /** The tool registry, exactly as the engine defines it. */
     fun listTools(): String = runCatching { listToolsNative() }
         .getOrDefault("{\"ok\":false}")

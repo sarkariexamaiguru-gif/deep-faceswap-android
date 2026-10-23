@@ -928,6 +928,10 @@ class MainActivity : Activity() {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 18)
         })
+        col.addView(toolCard(R.drawable.ic_hd, "Edit a photo",
+            "Crop, rotate, light, colour — instant, no models") {
+            startActivity(Intent(this@MainActivity, EditActivity::class.java))
+        })
         col.addView(toolCard(R.drawable.ic_person, "Face Mapping",
             "Choose which face goes where") {
             faceMode = 2

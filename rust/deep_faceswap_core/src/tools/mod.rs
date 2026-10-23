@@ -9,6 +9,7 @@
 //! would let whoever controls it choose what the app runs; a compiled table with
 //! a hash per file means a swapped mirror is caught, not executed.
 
+pub mod edit;
 pub mod upscale;
 
 use crate::types::{FaceSwapError, Result};
@@ -62,6 +63,14 @@ pub const TOOLS: &[ToolSpec] = &[ToolSpec {
 /// The registry as JSON, so the app does not keep a second copy of this list.
 pub fn registry_json() -> String {
     serde_json::to_string(TOOLS).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Run the instant tools - the arithmetic ones that need no model.
+pub fn apply_edits(
+    image: &Array3<u8>,
+    params: &edit::EditParams,
+) -> Result<Array3<u8>> {
+    edit::apply(image, params)
 }
 
 /// The largest input edge we will upscale.

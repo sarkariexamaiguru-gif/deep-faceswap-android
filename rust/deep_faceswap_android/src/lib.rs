@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use deep_faceswap_core::swap::{SwapOptions, SwapSession, SwapStage, MAX_PIXEL_BOOST};
+use deep_faceswap_core::tools::edit::EditParams;
 use deep_faceswap_core::tools::{ToolSession, MAX_INPUT_EDGE, TOOLS};
 use ndarray::Array3;
 
@@ -728,6 +729,70 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
 
 /// The loaded tool model, kept between calls so a batch does not reload it.
 static TOOL_SESSION: Mutex<Option<ToolSession>> = Mutex::new(None);
+
+/// Run the instant tools over an RGBA image and hand back RGBA.
+///
+/// No model, no download, no session - these are pixel operations, so there is
+/// nothing to load and nothing to fail beyond a bad parameter.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_editImageNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    width: jint,
+    height: jint,
+    rgba: JByteArray,
+    params_json: JString,
+) -> jbyteArray {
+    let json = jstring_to_string(&mut env, &params_json);
+    let w = width.max(0) as usize;
+    let h = height.max(0) as usize;
+
+    let input = match env.convert_byte_array(&rgba) {
+        Ok(bytes) => bytes,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    if w == 0 || h == 0 || input.len() < w * h * 4 {
+        return std::ptr::null_mut();
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let params: EditParams = serde_json::from_str(&json)
+            .map_err(|e| format!("bad parameters: {e}"))?;
+
+        let mut image = Array3::<u8>::zeros((h, w, 3));
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                image[[y, x, 0]] = input[i];
+                image[[y, x, 1]] = input[i + 1];
+                image[[y, x, 2]] = input[i + 2];
+            }
+        }
+
+        let out =
+            deep_faceswap_core::tools::apply_edits(&image, &params).map_err(|e| format!("{e}"))?;
+
+        let (out_h, out_w, _) = out.dim();
+        let mut bytes = Vec::with_capacity(out_h * out_w * 4);
+        for y in 0..out_h {
+            for x in 0..out_w {
+                bytes.push(out[[y, x, 0]]);
+                bytes.push(out[[y, x, 1]]);
+                bytes.push(out[[y, x, 2]]);
+                bytes.push(255);
+            }
+        }
+        Ok::<Vec<u8>, String>(bytes)
+    }));
+
+    match result {
+        Ok(Ok(bytes)) => match env.byte_array_from_slice(&bytes) {
+            Ok(array) => array.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        _ => std::ptr::null_mut(),
+    }
+}
 
 /// The tool registry, as JSON, so the app keeps no second copy of it.
 #[no_mangle]
