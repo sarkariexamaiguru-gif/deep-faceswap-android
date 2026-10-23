@@ -124,6 +124,17 @@ class VideoSwap(private val context: Context) {
             encoder.start()
 
             muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // The audio track has to be registered BEFORE the muxer starts.
+            // MediaMuxer refuses addTrack once started, and the video track starts
+            // it - so registering audio at the end, where the samples are copied,
+            // threw every single time. That is why video failed after doing all
+            // the work.
+            val audioTrackIndex = if (audioTrack >= 0 && keepAudio) {
+                runCatching { muxer.addTrack(extractor.getTrackFormat(audioTrack)) }
+                    .getOrDefault(-1)
+            } else {
+                -1
+            }
             val trackRef = intArrayOf(-1)
             val startedRef = booleanArrayOf(false)
 
@@ -169,13 +180,14 @@ class VideoSwap(private val context: Context) {
                         val outIndex = decoder.dequeueOutputBuffer(info, TIMEOUT_US)
                         if (outIndex >= 0) {
                             val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                            if (info.size > 0) {
-                                val image = decoder.getOutputImage(outIndex)
-                                if (image != null) {
-                                    // yuvToBitmap copies, so the buffer can be released at once
-                                    val frame = yuvToBitmap(image)
-                                    decodeOut.put(Frame(index++, info.presentationTimeUs, frame))
-                                }
+                            // Not gated on info.size: some decoders report a zero
+                            // size for image output, which would silently drop
+                            // every frame and leave an empty video.
+                            val image = decoder.getOutputImage(outIndex)
+                            if (image != null) {
+                                // yuvToBitmap copies, so the buffer can be released at once
+                                val frame = yuvToBitmap(image)
+                                decodeOut.put(Frame(index++, info.presentationTimeUs, frame))
                             }
                             decoder.releaseOutputBuffer(outIndex, false)
                             if (eos) inputDone = true
@@ -263,9 +275,9 @@ class VideoSwap(private val context: Context) {
 
             // ---- audio passthrough
             // Audio is copied through untouched, unless the user asked for silence.
-            if (audioTrack >= 0 && keepAudio) {
+            if (audioTrackIndex >= 0) {
                 // Losing the audio track should not lose the whole video.
-                runCatching { copyAudio(extractor, audioTrack, muxer) }
+                runCatching { copyAudio(extractor, audioTrackIndex, muxer) }
                     .onFailure { onMessage("The audio track could not be copied \u2014 the result is silent.") }
             }
 
@@ -418,8 +430,12 @@ class VideoSwap(private val context: Context) {
                 val image = encoder.getInputImage(index)
                 if (image != null) {
                     bitmapToYuv(bitmap, image)
+                    encoder.queueInputBuffer(
+                        index, 0, image.width * image.height * 3 / 2, ptsUs, 0,
+                    )
+                } else {
+                    encoder.queueInputBuffer(index, 0, width * height * 3 / 2, ptsUs, 0)
                 }
-                encoder.queueInputBuffer(index, 0, width * height * 3 / 2, ptsUs, 0)
                 return
             }
         }
@@ -475,11 +491,10 @@ class VideoSwap(private val context: Context) {
     }
 
     /** Copy the audio track through without re-encoding it. */
-    private fun copyAudio(extractor: MediaExtractor, audioTrack: Int, muxer: MediaMuxer) {
-        val format = extractor.getTrackFormat(audioTrack)
-        val index = muxer.addTrack(format)
+    /** Write the source audio through, to a track already registered with the muxer. */
+    private fun copyAudio(extractor: MediaExtractor, index: Int, muxer: MediaMuxer) {
         if (index < 0) return
-        extractor.selectTrack(audioTrack)
+        extractor.selectTrack(index)
 
         val info = MediaCodec.BufferInfo()
         val buffer = ByteBuffer.allocate(AUDIO_BUFFER)
@@ -560,12 +575,23 @@ class VideoSwap(private val context: Context) {
      * The chroma planes are subsampled 2x2, so each chroma sample averages its
      * four source pixels.
      */
-    /** Bitmap to YUV, writing into ByteArrays and copying each plane in once. */
+    /**
+     * Bitmap to YUV.
+     *
+     * Two different geometries have to be kept apart here: the encoder's image
+     * may be padded wider than the frame it holds. Reading the bitmap at the
+     * image's width walks off the end of the bitmap and throws, which failed
+     * every frame. So pixels are read at the bitmap's size and written at the
+     * image's, over the region they share.
+     */
     private fun bitmapToYuv(bitmap: Bitmap, image: android.media.Image) {
-        val width = image.width
-        val height = image.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        val bw = bitmap.width
+        val bh = bitmap.height
+        val copyW = minOf(bw, image.width)
+        val copyH = minOf(bh, image.height)
+
+        val pixels = IntArray(bw * bh)
+        bitmap.getPixels(pixels, 0, bw, 0, 0, bw, bh)
 
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
@@ -578,26 +604,24 @@ class VideoSwap(private val context: Context) {
         val uBytes = ByteArray(uPlane.buffer.remaining())
         val vBytes = ByteArray(vPlane.buffer.remaining())
 
-        var index = 0
-        for (row in 0 until height) {
+        for (row in 0 until copyH) {
             val yRow = row * yRowStride
-            val limit = minOf(width, yBytes.size - yRow)
+            val limit = minOf(copyW, yBytes.size - yRow)
             for (col in 0 until limit) {
-                val colour = pixels[index++]
+                val colour = pixels[row * bw + col]
                 val r = (colour shr 16) and 0xFF
                 val g = (colour shr 8) and 0xFF
                 val b = colour and 0xFF
                 val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
                 yBytes[yRow + col] = y.coerceIn(0, 255).toByte()
             }
-            index += width - limit
         }
 
         var row = 0
-        while (row < height) {
+        while (row < copyH) {
             val uvRow = (row shr 1) * uvRowStride
             var col = 0
-            while (col < width) {
+            while (col < copyW) {
                 var rSum = 0
                 var gSum = 0
                 var bSum = 0
@@ -606,8 +630,8 @@ class VideoSwap(private val context: Context) {
                     for (dx in 0..1) {
                         val x = col + dx
                         val y = row + dy
-                        if (x < width && y < height) {
-                            val colour = pixels[y * width + x]
+                        if (x < bw && y < bh) {
+                            val colour = pixels[y * bw + x]
                             rSum += (colour shr 16) and 0xFF
                             gSum += (colour shr 8) and 0xFF
                             bSum += colour and 0xFF
@@ -668,8 +692,12 @@ class VideoSwap(private val context: Context) {
         }
 
     private fun buildEncoderFormat(width: Int, height: Int, frameRate: Int): MediaFormat {
-        val bitrate = (width * height * 4).coerceIn(2_000_000, 12_000_000)
-        return MediaFormat.createVideoFormat(H264, width, height).apply {
+        // H.264 encoders reject odd dimensions on many devices, and the failure
+        // is at configure time, taking the whole job with it.
+        val w = width - (width % 2)
+        val h = height - (height % 2)
+        val bitrate = (w * h * 4).coerceIn(2_000_000, 12_000_000)
+        return MediaFormat.createVideoFormat(H264, w, h).apply {
             setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible,
