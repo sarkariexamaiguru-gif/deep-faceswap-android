@@ -89,7 +89,7 @@ class MainActivity : Activity() {
 
     // Shell
     private lateinit var content: FrameLayout
-    private lateinit var switcherRow: LinearLayout
+    private var switcherRow: LinearLayout? = null
     private lateinit var navRow: LinearLayout
     private val screens = linkedMapOf<String, View>()
     private var current = "swap"
@@ -179,7 +179,10 @@ class MainActivity : Activity() {
         }
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         column.addView(buildHeader())
-        column.addView(buildSwitcher())
+        // The work-mode switcher used to live here. It listed the same
+        // destinations as the bottom bar - Swap, Video, History - with Tools
+        // instead of Settings, so the app had two navigations that disagreed.
+        // One bar, one list.
         content = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
@@ -188,7 +191,12 @@ class MainActivity : Activity() {
         column.addView(content)
         root.addView(column, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-        ))
+        ).apply {
+            // The bar floats over the shell, so without this the last control on
+            // every screen sits underneath it - which is exactly where the
+            // "Swap the face" button was.
+            bottomMargin = dp(94)
+        })
         root.addView(buildBottomNav(), FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply {
@@ -262,7 +270,7 @@ class MainActivity : Activity() {
         }
 
     private fun buildSwitcher(): View {
-        switcherRow = LinearLayout(this).apply {
+        val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = getDrawable(R.drawable.bg_switcher)
             setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -273,7 +281,8 @@ class MainActivity : Activity() {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 0)
         }
-        host.addView(switcherRow)
+        switcherRow = row
+        host.addView(row)
         // Tools is intentionally absent: there is no Tools screen yet, and the
         // specification forbids leaving a decorative tab inert.
         renderSwitcher()
@@ -281,11 +290,12 @@ class MainActivity : Activity() {
     }
 
     private fun renderSwitcher() {
-        switcherRow.removeAllViews()
+        val row = switcherRow ?: return
+        row.removeAllViews()
         listOf("swap" to "Swap", "video" to "Video", "history" to "History", "tools" to "Tools")
             .forEachIndexed { index, (key, label) ->
                 val active = key == current
-                switcherRow.addView(LinearLayout(this).apply {
+                row.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                     background = if (active) getDrawable(R.drawable.bg_gradient_segment) else null
@@ -327,6 +337,7 @@ class MainActivity : Activity() {
             "swap" to ("Swap" to R.drawable.ic_swap),
             "video" to ("Video" to R.drawable.ic_video),
             "history" to ("History" to R.drawable.ic_history),
+            "tools" to ("Tools" to R.drawable.ic_tools),
             "settings" to ("Settings" to R.drawable.ic_settings),
         ).forEach { (key, spec) ->
             val (label, icon) = spec
@@ -362,7 +373,7 @@ class MainActivity : Activity() {
         renderSwitcher()
         renderNav()
         // Settings is not a peer of the work modes, so the switcher steps aside.
-        switcherRow.visibility = if (key == "settings") View.GONE else View.VISIBLE
+        switcherRow?.visibility = if (key == "settings") View.GONE else View.VISIBLE
         when (key) {
             "history" -> renderHistory()
             "settings" -> renderSettings()
