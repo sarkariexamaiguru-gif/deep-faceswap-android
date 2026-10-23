@@ -626,7 +626,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
 
 /// Turn colour matching on or off for subsequent swaps.
 #[no_mangle]
-pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setColorMatch(
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setColorMatchNative(
     _env: JNIEnv,
     _class: JClass,
     enabled: jboolean,

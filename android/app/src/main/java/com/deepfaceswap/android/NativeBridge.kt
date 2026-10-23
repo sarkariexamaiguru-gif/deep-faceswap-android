@@ -302,7 +302,7 @@ object NativeBridge {
         enhancerStrength: Float,
     ): String
 
-    private external fun setColorMatch(enabled: Boolean)
+    private external fun setColorMatchNative(enabled: Boolean)
 
     private external fun sessionSwapFrameRaw(
         width: Int,
@@ -397,7 +397,7 @@ object NativeBridge {
      * native signatures stable.
      */
     fun setColorMatch(enabled: Boolean) {
-        runCatching { setColorMatch(enabled) }
+        runCatching { setColorMatchNative(enabled) }
     }
 
     /** Release the session and free its models. Safe to call when none is open. */
