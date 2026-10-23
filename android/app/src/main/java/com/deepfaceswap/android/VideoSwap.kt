@@ -132,7 +132,7 @@ class VideoSwap(private val context: Context) {
             // Clones finish out of order, so results are re-ordered before they
             // reach the encoder: the muxer needs frames in presentation order.
             val ordered = FrameReorder()
-            val workers = clones.coerceIn(1, NativeBridge.MAX_CLONES)
+            val workers = clones.coerceIn(1, MAX_MODEL_CLONES)
 
             decodeThread = Thread({
                 val info = MediaCodec.BufferInfo()
@@ -262,8 +262,6 @@ class VideoSwap(private val context: Context) {
 
     /** One frame moving between pipeline stages. [index] < 0 marks the end. */
     private class Frame(val index: Int, val timeUs: Long, val frame: Bitmap?)
-
-    private val END_OF_STREAM = Frame(-1, 0L, null)
 
     /**
      * Holds frames that finished early until their turn comes.
@@ -668,6 +666,10 @@ class VideoSwap(private val context: Context) {
     private companion object {
         const val H264 = "video/avc"
         const val TIMEOUT_US = 10_000L
+
+        /** Marks the end of a frame stream. In the companion so the reorder
+         *  gate, which is a nested class, can see it. */
+        val END_OF_STREAM = Frame(-1, 0L, null)
 
         /** Frames in flight per stage; each costs one decoded bitmap of RAM. */
         const val PIPELINE_DEPTH = 3

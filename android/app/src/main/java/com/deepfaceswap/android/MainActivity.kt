@@ -2093,6 +2093,7 @@ class MainActivity : Activity() {
                 enhancerStrength = strength,
                 keepAudio = true,
                 colorMatch = prefs.colorMatch,
+                clones = prefs.clones,
                 originalPath = target.absolutePath,
                 modelLabel = label,
             )

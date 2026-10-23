@@ -726,7 +726,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
 
 /// How many clones to load on the next `sessionOpen`.
 #[no_mangle]
-pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setCloneCount(
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setCloneCountNative(
     _env: JNIEnv,
     _class: JClass,
     count: jint,

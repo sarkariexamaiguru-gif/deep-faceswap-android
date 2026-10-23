@@ -1,5 +1,13 @@
 package com.deepfaceswap.android
 
+/**
+ * How many clones of the chosen model may run at once.
+ *
+ * Each clone is a full copy of the models in memory, so the ceiling is
+ * deliberately low - it mirrors the engine's own cap.
+ */
+const val MAX_MODEL_CLONES = 4
+
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
@@ -90,9 +98,6 @@ object NativeBridge {
         IDLE, LOADING_MODELS, LOADING_SOURCE, DETECTING, SWAPPING, SAVING, DONE;
 
         companion object {
-        /** Mirrors the engine's own cap: each clone is a full copy of the models. */
-        const val MAX_CLONES = 4
-
             fun from(code: Int): Stage = when (code) {
                 0 -> LOADING_MODELS
                 1 -> LOADING_SOURCE
@@ -318,7 +323,7 @@ object NativeBridge {
         enhancerStrength: Float,
     ): ByteArray?
 
-    private external fun setCloneCount(count: Int)
+    private external fun setCloneCountNative(count: Int)
 
     private external fun sessionSwapFrameRaw(
         width: Int,
@@ -414,7 +419,7 @@ object NativeBridge {
      * one already open.
      */
     fun setCloneCount(count: Int) {
-        runCatching { setCloneCount(count.coerceIn(1, MAX_CLONES)) }
+        runCatching { setCloneCountNative(count.coerceIn(1, MAX_MODEL_CLONES)) }
     }
 
     /**

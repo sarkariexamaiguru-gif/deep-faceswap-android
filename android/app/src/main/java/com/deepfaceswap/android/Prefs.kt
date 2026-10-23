@@ -42,11 +42,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("save_gallery", false)
         set(v) = sp.edit().putBoolean("save_gallery", v).apply()
 
-    /** Keep finished results in the in-app history. */
-    /** Match the swapped face's colour to the target's own skin tone. */
     /** Clones of the chosen model to run in parallel. 1 disables it. */
-    var clones: Int
-
     var clones: Int
         get() = sp.getInt("clones", 1).coerceIn(1, 4)
         set(value) = sp.edit().putInt("clones", value.coerceIn(1, 4)).apply()
@@ -55,6 +51,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("color_match", true)
         set(value) = sp.edit().putBoolean("color_match", value).apply()
 
+    /** Keep finished results in the in-app history. */
     var keepHistory: Boolean
         get() = sp.getBoolean("keep_history", true)
         set(v) = sp.edit().putBoolean("keep_history", v).apply()
