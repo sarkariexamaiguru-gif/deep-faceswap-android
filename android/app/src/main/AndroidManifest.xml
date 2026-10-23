@@ -41,6 +41,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Upscale: the first tool wired end to end, registry to save. -->
+        <activity
+            android:name=".UpscaleActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/Theme.Roop" />
+
         <!-- The instant tools. Its own activity on purpose: the main shell is due
              to be rebuilt around a tool grid, and this survives that untouched. -->
         <activity

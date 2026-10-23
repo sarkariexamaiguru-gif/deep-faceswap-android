@@ -1047,7 +1047,9 @@ class MainActivity : Activity() {
 
         col.addView(homeSection("Fix and sharpen"))
         col.addView(homeRow(
-            homeTile(R.drawable.ic_hd, "Upscale", "4x, sharper edges", false) { notYet("Upscale") },
+            homeTile(R.drawable.ic_hd, "Upscale", "4x, sharper edges", true) {
+                startActivity(Intent(this@MainActivity, UpscaleActivity::class.java))
+            },
             homeTile(R.drawable.ic_sparkle, "Remove blur", "Soft and motion-blurred shots", false) {
                 notYet("Remove blur")
             },
