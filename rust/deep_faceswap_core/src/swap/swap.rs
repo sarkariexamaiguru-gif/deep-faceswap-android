@@ -210,15 +210,18 @@ pub fn swap_single_pair_opts(
         )?
     };
 
-    // Colour match: the swapper brings its own lighting, so the pasted face can
-    // read as a different skin tone from the rest of the frame. Transferring the
-    // target face's colour statistics onto the swapped face is what makes the
-    // seam disappear. Arithmetic only - no model, no measurable cost.
-    let swapped_face = if opts.color_match {
+    // The swapper works in normalised f32, so the colour reference is the
+    // original aligned target face converted the same way paste_back does it.
+    let color_reference = if opts.color_match {
         log_additional!(EVENT_PASTE_BACK, "Matching the swapped face's colour");
-        color::color_transfer_lab(&swapped_face, &target_aligned.aligned_image)
+        Some(Array3::<u8>::from_shape_fn(
+            (swap_size as usize, swap_size as usize, 3),
+            |(y, x, c)| {
+                (target_aligned.aligned_image[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
+            },
+        ))
     } else {
-        swapped_face
+        None
     };
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
@@ -227,6 +230,7 @@ pub fn swap_single_pair_opts(
         &swapped_face,
         &target_aligned.transform,
         swap_size,
+        color_reference.as_ref(),
     )?;
 
     // Apply mouth mask after swap but before enhancement
@@ -242,6 +246,16 @@ pub fn swap_single_pair_opts(
         // Align target face from current image to 512x512 for enhancement
         let target_aligned_512 = alignment::align_face(target_image, target_face, 512)?;
         let before = target_aligned_512.aligned_image.clone();
+
+        // The enhanced face gets the same treatment, matched against the face as
+        // it stands now, so restoring detail cannot shift the colour again.
+        let enhanced_reference = if opts.color_match {
+            Some(Array3::<u8>::from_shape_fn((512, 512, 3), |(y, x, c)| {
+                (before[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
+            }))
+        } else {
+            None
+        };
 
         // Enhance the 512x512 aligned face
         let enhanced_512 = enh.enhance(&before)?;
@@ -271,6 +285,7 @@ pub fn swap_single_pair_opts(
             &blended,
             &target_aligned_512.transform,
             512,
+            enhanced_reference.as_ref(),
         )?;
     }
 

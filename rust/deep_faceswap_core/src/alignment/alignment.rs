@@ -6,6 +6,7 @@
 
 use crate::types::{AlignedFace, DetectedFace, FaceSwapError, Result};
 use crate::utils::blur::gaussian_blur_2d;
+use crate::utils::color;
 use crate::utils::cv::erode_mask_optimized;
 use crate::utils::transform::{estimate_affine_transform, invert_affine_transform, warp_affine};
 use ndarray::{Array2, Array3, Array4};
@@ -194,7 +195,7 @@ pub fn paste_back(
 ) -> Result<Array3<u8>> {
     let mut result = target_img.clone();
     #[allow(deprecated)]
-    paste_back_inplace(&mut result, swapped_face, align_transform, face_size)?;
+    paste_back_inplace(&mut result, swapped_face, align_transform, face_size, None)?;
     Ok(result)
 }
 
@@ -221,6 +222,7 @@ pub fn paste_back_inplace(
     swapped_face: &Array4<f32>,
     align_transform: &Array2<f32>,
     face_size: u32,
+    color_reference: Option<&Array3<u8>>,
 ) -> Result<()> {
     let face_size_usize = face_size as usize;
     let (h, w, _) = target_img.dim();
@@ -229,6 +231,17 @@ pub fn paste_back_inplace(
     let swapped_u8 = Array3::from_shape_fn((face_size_usize, face_size_usize, 3), |(y, x, c)| {
         (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
     });
+
+    // Colour match: the swapper brings its own lighting, so the pasted face can
+    // read as a different skin tone from the rest of the frame. Giving it the
+    // target face's own colour statistics is what makes the seam disappear.
+    // Arithmetic only - no model, no measurable cost.
+    let swapped_u8 = match color_reference {
+        Some(reference) if reference.dim() == swapped_u8.dim() => {
+            color::color_transfer_lab(&swapped_u8, reference)
+        }
+        _ => swapped_u8,
+    };
 
     // Compute face ROI by inverse-transforming aligned face corners to target image space
     let inv = invert_affine_transform(align_transform)?;
