@@ -13,6 +13,8 @@ import android.media.MediaMuxer
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Swaps faces across a video using the platform's own media stack.
@@ -58,6 +60,8 @@ class VideoSwap(private val context: Context) {
         var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
+        var decodeThread: Thread? = null
+        var swapThread: Thread? = null
         val frameDir = File(context.cacheDir, "video_frames")
         try {
             extractor = MediaExtractor()
@@ -118,51 +122,91 @@ class VideoSwap(private val context: Context) {
             val bufferInfo = MediaCodec.BufferInfo()
             val mappingSpec = mappings.joinToString(",") { "${it.first}:${it.second}" }
 
+            // ---- three-stage pipeline ------------------------------------
+            // The engine needs exclusive access to its models, so frames cannot
+            // be swapped concurrently. What CAN overlap is everything around it:
+            // decoding, the PNG round-trip to native, and encoding each run on
+            // their own thread, so the swapper is never idle waiting on a codec.
+            val decodeOut = LinkedBlockingQueue<Frame>(PIPELINE_DEPTH)
+            val swapOut = LinkedBlockingQueue<Frame>(PIPELINE_DEPTH)
+            val failure = AtomicReference<Throwable?>(null)
+
+            decodeThread = Thread({
+                val info = MediaCodec.BufferInfo()
+                try {
+                    var inputDone = false
+                    var index = 0
+                    while (!inputDone) {
+                        val inIndex = decoder.dequeueInputBuffer(TIMEOUT_US)
+                        if (inIndex >= 0) {
+                            val buffer = decoder.getInputBuffer(inIndex)
+                            val size = if (buffer != null) extractor.readSampleData(buffer, 0) else -1
+                            if (size < 0) {
+                                decoder.queueInputBuffer(
+                                    inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM,
+                                )
+                                inputDone = true
+                            } else {
+                                decoder.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
+                                extractor.advance()
+                            }
+                        }
+                        val outIndex = decoder.dequeueOutputBuffer(info, TIMEOUT_US)
+                        if (outIndex >= 0) {
+                            val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                            if (info.size > 0) {
+                                val image = decoder.getOutputImage(outIndex)
+                                if (image != null) {
+                                    // yuvToBitmap copies, so the buffer can be released at once
+                                    val frame = yuvToBitmap(image)
+                                    decodeOut.put(Frame(index++, info.presentationTimeUs, frame))
+                                }
+                            }
+                            decoder.releaseOutputBuffer(outIndex, false)
+                            if (eos) inputDone = true
+                        }
+                    }
+                } catch (t: Throwable) {
+                    failure.compareAndSet(null, t)
+                } finally {
+                    decodeOut.put(END_OF_STREAM)
+                }
+            }, "roop-decode")
+
+            swapThread = Thread({
+                try {
+                    while (true) {
+                        val item = decodeOut.take()
+                        if (item.index < 0) break
+                        val swapped = swapOneFrame(
+                            item.frame!!, inFile, outFile, mappingSpec,
+                            useMouthMask, pixelBoost, enhancerStrength,
+                        )
+                        swapOut.put(Frame(item.index, item.timeUs, swapped))
+                    }
+                } catch (t: Throwable) {
+                    failure.compareAndSet(null, t)
+                } finally {
+                    swapOut.put(END_OF_STREAM)
+                }
+            }, "roop-swap")
+
+            decodeThread.start()
+            swapThread.start()
+
+            // ---- stage 3, on this thread: encode in presentation order
             var frames = 0
-            var inputDone = false
-            var outputDone = false
-
-            while (!outputDone) {
-                if (!inputDone) {
-                    val inIndex = decoder.dequeueInputBuffer(TIMEOUT_US)
-                    if (inIndex >= 0) {
-                        val buffer = decoder.getInputBuffer(inIndex)
-                        val size = if (buffer != null) extractor.readSampleData(buffer, 0) else -1
-                        if (size < 0) {
-                            decoder.queueInputBuffer(
-                                inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM,
-                            )
-                            inputDone = true
-                        } else {
-                            decoder.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
-                            extractor.advance()
-                        }
-                    }
-                }
-
-                val outIndex = decoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
-                if (outIndex >= 0) {
-                    val endOfStream =
-                        bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                    if (bufferInfo.size > 0) {
-                        val image = decoder.getOutputImage(outIndex)
-                        if (image != null) {
-                            val frame = yuvToBitmap(image)
-                            val swapped = swapOneFrame(
-                                frame, inFile, outFile, mappingSpec,
-                                useMouthMask, pixelBoost, enhancerStrength,
-                            )
-                            feedEncoder(encoder, swapped, bufferInfo.presentationTimeUs, width, height)
-                            frames++
-                            onFrame(frames, if (estimated > 0) estimated else frames)
-                        }
-                    }
-                    decoder.releaseOutputBuffer(outIndex, false)
-                    if (endOfStream) outputDone = true
-                }
-
+            while (true) {
+                val item = swapOut.take()
+                if (item.index < 0) break
+                feedEncoder(encoder, item.frame!!, item.timeUs, width, height)
+                frames++
+                onFrame(frames, if (estimated > 0) estimated else frames)
                 drainEncoder(encoder, muxer, bufferInfo, trackRef, startedRef, false)
             }
+            decodeThread.join()
+            swapThread.join()
+            failure.get()?.let { throw it }
 
             // ---- flush the encoder
             onMessage("Finishing video …")
@@ -185,6 +229,8 @@ class VideoSwap(private val context: Context) {
             // Never let a media failure take the app down: report it instead.
             return Result(false, 0, "${e.javaClass.simpleName}: ${e.message ?: "video swap failed"}")
         } finally {
+            decodeThread?.interrupt()
+            swapThread?.interrupt()
             runCatching { decoder?.stop() }
             runCatching { decoder?.release() }
             runCatching { encoder?.stop() }
@@ -196,6 +242,13 @@ class VideoSwap(private val context: Context) {
             runCatching { frameDir.deleteRecursively() }
         }
     }
+
+    // --------------------------------------------------------------- pipeline --
+
+    /** One frame moving between pipeline stages. [index] < 0 marks the end. */
+    private class Frame(val index: Int, val timeUs: Long, val frame: Bitmap?)
+
+    private val END_OF_STREAM = Frame(-1, 0L, null)
 
     // ------------------------------------------------------------ per frame --
 
@@ -510,6 +563,9 @@ class VideoSwap(private val context: Context) {
     private companion object {
         const val H264 = "video/avc"
         const val TIMEOUT_US = 10_000L
+
+        /** Frames in flight per stage; each costs one decoded bitmap of RAM. */
+        const val PIPELINE_DEPTH = 3
         const val AUDIO_BUFFER = 256 * 1024
 
         /** Roughly a minute at 20fps; longer clips would take far too long on a phone. */

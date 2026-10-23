@@ -124,6 +124,8 @@ class MainActivity : Activity() {
     private lateinit var modelRow: LinearLayout
     private lateinit var downloadCard: LinearLayout
     private var activeDownload: String? = null
+    /** Held so it can actually be unregistered in onDestroy. */
+    private val swapListener: (SwapBus.State) -> Unit = { state -> io.post { onSwapState(state) } }
     private var lastProgress: ModelManager.Progress? = null
     private lateinit var qualitySegmentHost: LinearLayout
     private lateinit var qualityHint: TextView
@@ -147,6 +149,7 @@ class MainActivity : Activity() {
         models.copyEmapFromAssetsIfPresent()
 
         setContentView(buildShell())
+        SwapBus.addListener(swapListener)
 
         screens["swap"] = buildSwapScreen().also { content.addView(it) }
         screens["video"] = buildVideoScreen().also { content.addView(it) }
@@ -155,6 +158,11 @@ class MainActivity : Activity() {
         screens["tools"] = buildToolsScreen().also { content.addView(it) }
 
         show("swap")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        SwapBus.removeListener(swapListener)
     }
 
     /**
@@ -2021,59 +2029,45 @@ class MainActivity : Activity() {
             else -> encodableExtension(target.name)
         }
         val output = File(outDir, "roop_$stamp.$ext")
-
         val strength = if (restoreOn) prefs.restoreStrength else 1f
         val sources = sourceFiles.map { it.absolutePath }
         val grid = qualityGrid()
+        val label = modelOptions().firstOrNull { it.first == swapperFile }?.second ?: swapperFile
 
+        // The work is handed to a foreground service, so it survives the app
+        // being backgrounded or the screen switching off.
+        SwapBus.pending = if (video) {
+            SwapBus.Job.Video(
+                inputPath = target.absolutePath,
+                outputPath = output.absolutePath,
+                sourcePaths = sources,
+                swapperFile = swapperFile,
+                pixelBoost = grid,
+                enhancerStrength = strength,
+                keepAudio = true,
+                originalPath = target.absolutePath,
+                modelLabel = label,
+            )
+        } else {
+            SwapBus.Job.Image(
+                sourcePaths = sources,
+                targetPath = target.absolutePath,
+                outputPath = output.absolutePath,
+                swapperFile = swapperFile,
+                pixelBoost = grid,
+                enhancerStrength = strength,
+                mappings = if (manual) mappings.toList() else emptyList(),
+                animate = isAnimation(target.name),
+                swapEveryFace = faceMode == 1,
+                originalPath = target.absolutePath,
+                modelLabel = label,
+            )
+        }
         setSwapBusy(true, "Preparing\u2026")
         if (!video) startPolling()
-
-        Thread {
-            val result = when {
-                video -> VideoSwap(this).swap(
-                    input = target, output = output, sourcePaths = sources,
-                    mappings = if (manual) mappings.toList() else emptyList(),
-                    swapperFile = swapperFile, useMouthMask = false,
-                    pixelBoost = grid, enhancerStrength = strength, keepAudio = true,
-                    onMessage = { m -> io.post { swapStatus.text = m } },
-                    onFrame = { done, total -> io.post {
-                        swapBar.progress = if (total > 0) done * 100 / total else 0
-                        swapStatus.text = "Processing frame $done/$total"
-                    } },
-                ).let { SwapOutcome(it.ok, it.error, it.frames) }
-                isAnimation(target.name) -> NativeBridge.swapAnimation(
-                    this, sources, target.absolutePath, output.absolutePath,
-                    if (manual) mappings.toList() else emptyList(),
-                    swapperFile, false, grid, strength,
-                ).let { SwapOutcome(it.ok, it.error, it.frames) }
-                manual -> NativeBridge.swapMapped(
-                    this, sources, target.absolutePath, output.absolutePath,
-                    mappings.toList(), swapperFile, false, grid, strength,
-                ).let { SwapOutcome(it.ok, it.error, 0) }
-                else -> NativeBridge.swap(
-                    this, sources, target.absolutePath, output.absolutePath,
-                    swapperFile, false, faceMode == 1, grid, strength,
-                ).let { SwapOutcome(it.ok, it.error, 0) }
-            }
-            io.post {
-                stopPolling()
-                setSwapBusy(false, "")
-                if (result.ok) {
-                    val label = modelOptions().firstOrNull { it.first == swapperFile }?.second ?: swapperFile
-                    registerResult(output, target, label)
-                    showResultCardFor(output, "swap")
-                    swapStatus.text = "Completed"
-                    toast("Done")
-                } else {
-                    swapStatus.text = result.error ?: "The swap could not be completed."
-                    toast("Swap failed")
-                }
-            }
-        }.start()
+        requestNotificationConsent()
+        SwapService.start(this)
     }
-
-    private data class SwapOutcome(val ok: Boolean, val error: String?, val frames: Int)
 
     private fun runVideo() {
         val target = vTarget ?: return
@@ -2083,33 +2077,79 @@ class MainActivity : Activity() {
         val output = File(outDir, "roop_$stamp.mp4")
         val sources = vSources.map { it.absolutePath }
         val strength = if (restoreOn) prefs.restoreStrength else 1f
+        val label = modelOptions().firstOrNull { it.first == swapperFile }?.second ?: swapperFile
 
+        SwapBus.pending = SwapBus.Job.Video(
+            inputPath = target.absolutePath,
+            outputPath = output.absolutePath,
+            sourcePaths = sources,
+            swapperFile = swapperFile,
+            pixelBoost = qualityGrid(),
+            enhancerStrength = strength,
+            keepAudio = !vMute,
+            originalPath = target.absolutePath,
+            modelLabel = label,
+        )
         setVideoBusy(true, "Preparing\u2026")
-        Thread {
-            val result = VideoSwap(this).swap(
-                input = target, output = output, sourcePaths = sources,
-                mappings = emptyList(), swapperFile = swapperFile, useMouthMask = false,
-                pixelBoost = qualityGrid(), enhancerStrength = strength, keepAudio = !vMute,
-                onMessage = { m -> io.post { vidStatus.text = m } },
-                onFrame = { done, total -> io.post {
-                    vidBar.progress = if (total > 0) done * 100 / total else 0
-                    vidStatus.text = "Processing frame $done/$total"
-                } },
-            )
-            io.post {
+        requestNotificationConsent()
+        SwapService.start(this)
+    }
+
+    /** The progress notification needs consent on API 33 and later. */
+    private fun requestNotificationConsent() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+    }
+
+    /**
+     * Live progress from the running swap, wherever it is: the engine publishes
+     * frames done, a measured rate, and an estimate of what is left.
+     */
+    private fun onSwapState(state: SwapBus.State) {
+        if (state.running && state.framesTotal > 0) {
+            val percent = (state.fraction * 100f).toInt().coerceIn(0, 100)
+            vidBar.visibility = View.VISIBLE
+            vidBar.progress = percent
+            vidStatus.text = state.detail
+            swapBar.visibility = View.VISIBLE
+            swapBar.progress = percent
+            swapStatus.text = state.detail
+        } else if (state.running && state.message.isNotEmpty()) {
+            vidStatus.text = state.message
+            swapStatus.text = state.message
+        }
+
+        when (state.stage) {
+            SwapBus.Stage.DONE -> {
+                stopPolling()
+                setSwapBusy(false, "")
                 setVideoBusy(false, "")
-                if (result.ok) {
-                    val label = modelOptions().firstOrNull { it.first == swapperFile }?.second ?: swapperFile
-                    registerResult(output, target, label)
-                    showResultCardFor(output, "video")
-                    vidStatus.text = "Completed"
-                    toast("Done")
-                } else {
-                    vidStatus.text = result.error ?: "Video processing failed."
-                    toast("Video failed")
+                val path = state.resultPath ?: return
+                val out = File(path)
+                state.originalPath?.let { original ->
+                    registerResult(out, File(original), state.modelLabel)
                 }
+                val host = if (isVideo(out.name)) "video" else "swap"
+                showResultCardFor(out, host)
+                if (host == "video") vidStatus.text = "Completed" else swapStatus.text = "Completed"
+                toast("Done")
             }
-        }.start()
+            SwapBus.Stage.FAILED -> {
+                stopPolling()
+                setSwapBusy(false, "")
+                setVideoBusy(false, "")
+                val message = state.error ?: "The swap could not be completed."
+                swapStatus.text = message
+                vidStatus.text = message
+                toast("Swap failed")
+            }
+            else -> Unit
+        }
     }
 
     private fun qualityGrid(): Int = when (qualityIndex) {
@@ -2666,6 +2706,7 @@ class MainActivity : Activity() {
         const val REQ_CAM_VSOURCE = 16
         const val REQ_CAM_TARGET = 18
         const val REQ_PERMISSION = 17
+        const val REQ_NOTIFICATIONS = 19
 
         val ENCODABLE_OUTPUT = setOf("jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp", "gif")
         val VIDEO_EXTENSIONS = setOf(

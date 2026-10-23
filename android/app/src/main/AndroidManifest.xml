@@ -10,6 +10,14 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- A swap runs in a foreground service, so it keeps going when the app is
+         backgrounded or the screen is off. Android will not kill the process
+         while the service is in the foreground. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- API 33+ requires consent before the progress notification can be shown. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- The camera is optional: the app falls back to the gallery. -->
     <uses-feature
         android:name="android.hardware.camera"
@@ -32,6 +40,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Owns a running swap so it outlives the activity. -->
+        <service
+            android:name=".SwapService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Serves finished results to other apps for sharing. Android will not
              accept a file:// URI, and this avoids pulling in AndroidX. -->
