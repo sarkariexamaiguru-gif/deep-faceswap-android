@@ -1200,15 +1200,18 @@ class MainActivity : Activity() {
         row.addView(RoopUi.softTile(this, R.drawable.ic_cube,
             if (model.installed) R.color.blue else R.color.ink_muted))
 
-        val text = LinearLayout(this).apply {
+        // Not named `text`: inside the TextView's apply block below, a local called
+        // text shadows the property and the assignment silently targets the wrong
+        // thing.
+        val labels = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 11, 0, 0, 0)
         }
-        text.addView(RoopUi.cardTitle(this, model.title))
+        labels.addView(RoopUi.cardTitle(this, model.title))
         val meta = RoopUi.meta(this, "${model.approxSize} · ${model.licence}")
-        text.addView(meta)
-        row.addView(text, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        labels.addView(meta)
+        row.addView(labels, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         val action = TextView(this).apply {
             text = if (model.installed) "Installed" else "Get"
