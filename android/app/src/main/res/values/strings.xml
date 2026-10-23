@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Roop</string>
-    <string name="tagline">Your Face. Your Creation.</string>
+    <string name="app_name">LabPic</string>
+    <string name="tagline">A lab for pictures</string>
     <string name="private_label">Private</string>
 </resources>

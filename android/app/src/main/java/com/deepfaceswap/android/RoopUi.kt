@@ -69,7 +69,7 @@ object RoopUi {
         elevation = dp(ctx, 3).toFloat()
         layoutParams = lp(dp(ctx, 46), dp(ctx, 46))
         addView(ImageView(ctx).apply {
-            setImageResource(R.drawable.roop_logo)
+            setImageResource(R.drawable.ic_mark_labpic)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = ctx.getString(R.string.app_name)
             layoutParams = FrameLayout.LayoutParams(
