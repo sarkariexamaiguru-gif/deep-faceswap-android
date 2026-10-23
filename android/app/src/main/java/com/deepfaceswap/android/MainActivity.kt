@@ -1292,15 +1292,20 @@ class MainActivity : Activity() {
 
     private fun homeRow(left: View, right: View?): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(left, RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        // WRAP_CONTENT, not MATCH_PARENT. A child asking for match_parent height
+        // inside a wrap_content row measures against a height that is not decided
+        // yet, and collapses to zero - which is what made every tile on Home
+        // vanish while the section headings stayed. The even heights come from
+        // minimumHeight on the cards instead, which does not depend on the parent.
+        row.addView(left, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(android.view.View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(13), 1)
         })
         if (right != null) {
-            row.addView(right, RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            row.addView(right, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         } else {
             row.addView(android.view.View(this),
-                RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         return row
     }
