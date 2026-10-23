@@ -82,6 +82,7 @@ class SwapService : Service() {
         }
         notifyProgress()
         NativeBridge.setColorMatch(job.colorMatch)
+        NativeBridge.setCloneCount(job.clones)
 
         val result = VideoSwap(this).swap(
             input = File(job.inputPath),
@@ -93,6 +94,7 @@ class SwapService : Service() {
             pixelBoost = job.pixelBoost,
             enhancerStrength = job.enhancerStrength,
             keepAudio = job.keepAudio,
+            clones = job.clones,
             onMessage = { message ->
                 SwapBus.update { it.copy(message = message) }
                 notifyProgress()

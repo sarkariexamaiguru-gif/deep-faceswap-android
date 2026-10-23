@@ -75,6 +75,8 @@ object SwapBus {
             val enhancerStrength: Float,
             val keepAudio: Boolean,
             val colorMatch: Boolean,
+            /** Clones of the model to run in parallel; 1 means a single session. */
+            val clones: Int,
             val originalPath: String,
             val modelLabel: String,
         ) : Job()

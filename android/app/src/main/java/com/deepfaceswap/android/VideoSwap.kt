@@ -14,6 +14,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -53,6 +54,7 @@ class VideoSwap(private val context: Context) {
         pixelBoost: Int,
         enhancerStrength: Float,
         keepAudio: Boolean,
+        clones: Int = 1,
         onMessage: (String) -> Unit,
         onFrame: (Int, Int) -> Unit,
     ): Result {
@@ -61,7 +63,7 @@ class VideoSwap(private val context: Context) {
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
         var decodeThread: Thread? = null
-        var swapThread: Thread? = null
+        val swapThreads = mutableListOf<Thread>()
         val frameDir = File(context.cacheDir, "video_frames")
         try {
             extractor = MediaExtractor()
@@ -126,8 +128,11 @@ class VideoSwap(private val context: Context) {
             // decoding, the PNG round-trip to native, and encoding each run on
             // their own thread, so the swapper is never idle waiting on a codec.
             val decodeOut = LinkedBlockingQueue<Frame>(PIPELINE_DEPTH)
-            val swapOut = LinkedBlockingQueue<Frame>(PIPELINE_DEPTH)
             val failure = AtomicReference<Throwable?>(null)
+            // Clones finish out of order, so results are re-ordered before they
+            // reach the encoder: the muxer needs frames in presentation order.
+            val ordered = FrameReorder()
+            val workers = clones.coerceIn(1, NativeBridge.MAX_CLONES)
 
             decodeThread = Thread({
                 val info = MediaCodec.BufferInfo()
@@ -171,31 +176,43 @@ class VideoSwap(private val context: Context) {
                 }
             }, "roop-decode")
 
-            swapThread = Thread({
-                try {
-                    while (true) {
-                        val item = decodeOut.take()
-                        if (item.index < 0) break
-                        val swapped = swapOneFrame(
-                            item.frame!!, mappingSpec,
-                            useMouthMask, pixelBoost, enhancerStrength,
-                        )
-                        swapOut.put(Frame(item.index, item.timeUs, swapped))
+            // One thread per clone. Each holds its own copy of the models, so
+            // they never contend, and the frames divide between them.
+            val live = AtomicInteger(workers)
+            for (worker in 0 until workers) {
+                val thread = Thread({
+                    try {
+                        while (true) {
+                            val item = decodeOut.take()
+                            if (item.index < 0) {
+                                // Hand the sentinel on so the other clones stop too.
+                                decodeOut.put(END_OF_STREAM)
+                                break
+                            }
+                            val swapped = swapOneFrame(
+                                item.frame!!, mappingSpec,
+                                useMouthMask, pixelBoost, enhancerStrength,
+                                worker, workers,
+                            )
+                            ordered.put(Frame(item.index, item.timeUs, swapped))
+                        }
+                    } catch (t: Throwable) {
+                        failure.compareAndSet(null, t)
+                    } finally {
+                        // Only the last clone out closes the ordering gate.
+                        if (live.decrementAndGet() == 0) ordered.close()
                     }
-                } catch (t: Throwable) {
-                    failure.compareAndSet(null, t)
-                } finally {
-                    swapOut.put(END_OF_STREAM)
-                }
-            }, "roop-swap")
+                }, "roop-swap-$worker")
+                swapThreads.add(thread)
+            }
 
             decodeThread.start()
-            swapThread.start()
+            swapThreads.forEach { it.start() }
 
             // ---- stage 3, on this thread: encode in presentation order
             var frames = 0
             while (true) {
-                val item = swapOut.take()
+                val item = ordered.take()
                 if (item.index < 0) break
                 feedEncoder(encoder, item.frame!!, item.timeUs, width, height)
                 frames++
@@ -203,7 +220,7 @@ class VideoSwap(private val context: Context) {
                 drainEncoder(encoder, muxer, bufferInfo, trackRef, startedRef, false)
             }
             decodeThread.join()
-            swapThread.join()
+            swapThreads.forEach { it.join() }
             failure.get()?.let { throw it }
 
             // ---- flush the encoder
@@ -228,7 +245,7 @@ class VideoSwap(private val context: Context) {
             return Result(false, 0, "${e.javaClass.simpleName}: ${e.message ?: "video swap failed"}")
         } finally {
             decodeThread?.interrupt()
-            swapThread?.interrupt()
+            swapThreads.forEach { it.interrupt() }
             runCatching { decoder?.stop() }
             runCatching { decoder?.release() }
             runCatching { encoder?.stop() }
@@ -248,6 +265,45 @@ class VideoSwap(private val context: Context) {
 
     private val END_OF_STREAM = Frame(-1, 0L, null)
 
+    /**
+     * Holds frames that finished early until their turn comes.
+     *
+     * With several clones the work completes out of order, but the encoder must
+     * receive frames in presentation order, so this buffers and releases them in
+     * sequence.
+     */
+    private class FrameReorder {
+        private val lock = Object()
+        private val ready = java.util.TreeMap<Int, Frame>()
+        private var next = 0
+        private var closed = false
+
+        fun put(frame: Frame) = synchronized(lock) {
+            if (frame.index < 0) closed = true else ready[frame.index] = frame
+            lock.notifyAll()
+        }
+
+        fun close() = synchronized(lock) {
+            closed = true
+            lock.notifyAll()
+        }
+
+        /** Blocks until the next frame in order arrives, or the stream ends. */
+        fun take(): Frame = synchronized(lock) {
+            while (true) {
+                val head = ready.remove(next)
+                if (head != null) {
+                    next++
+                    return head
+                }
+                if (closed) return END_OF_STREAM
+                lock.wait()
+            }
+            @Suppress("UNREACHABLE_CODE")
+            END_OF_STREAM
+        }
+    }
+
     // ------------------------------------------------------------ per frame --
 
     /** Send one frame through native, falling back to the original on failure. */
@@ -264,6 +320,8 @@ class VideoSwap(private val context: Context) {
         useMouthMask: Boolean,
         pixelBoost: Int,
         enhancerStrength: Float,
+        worker: Int,
+        workers: Int,
     ): Bitmap {
         return try {
             if (frame.config != Bitmap.Config.ARGB_8888) {
@@ -274,10 +332,18 @@ class VideoSwap(private val context: Context) {
             val input = ByteBuffer.allocate(width * height * 4)
             frame.copyPixelsToBuffer(input)
 
-            val swapped = NativeBridge.swapSessionFrameRaw(
-                width, height, input.array(), mappingSpec,
-                useMouthMask, pixelBoost, enhancerStrength,
-            ) ?: return frame
+            val bytes = input.array()
+            val swapped = if (workers > 1) {
+                NativeBridge.swapSessionFrameRawWorker(
+                    worker, width, height, bytes, mappingSpec,
+                    useMouthMask, pixelBoost, enhancerStrength,
+                )
+            } else {
+                NativeBridge.swapSessionFrameRaw(
+                    width, height, bytes, mappingSpec,
+                    useMouthMask, pixelBoost, enhancerStrength,
+                )
+            } ?: return frame
             if (swapped.size < width * height * 4) return frame
 
             val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

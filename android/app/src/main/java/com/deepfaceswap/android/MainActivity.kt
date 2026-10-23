@@ -883,6 +883,28 @@ class MainActivity : Activity() {
                 }
             }
         })
+        // Clones of the chosen model, working the frames in parallel. Each clone
+        // is a full copy of the model in memory, so the count is a real trade.
+        vidTiles.addView(RoopUi.optionTile(
+            this, R.drawable.ic_cube, "Clones",
+            if (prefs.clones > 1) "${prefs.clones}\u00D7" else "Off",
+        ).apply {
+            setOnClickListener {
+                showSheet(
+                    "Model clones",
+                    listOf("Off (1)", "2 clones", "3 clones", "4 clones"),
+                    prefs.clones - 1,
+                    listOf(
+                        "One session. Least memory.",
+                        "Two copies, working frames in parallel. Roughly 1.5x on the swap.",
+                        "Three copies. More memory again, smaller gain.",
+                        "Four copies. Needs a lot of RAM, and may be killed.",
+                    ),
+                ) { pick ->
+                    prefs.clones = pick + 1; refreshVideo()
+                }
+            }
+        })
     }
 
     // ------------------------------------------------------ tools screen
@@ -2115,6 +2137,7 @@ class MainActivity : Activity() {
             enhancerStrength = strength,
             keepAudio = !vMute,
             colorMatch = prefs.colorMatch,
+            clones = prefs.clones,
             originalPath = target.absolutePath,
             modelLabel = label,
         )

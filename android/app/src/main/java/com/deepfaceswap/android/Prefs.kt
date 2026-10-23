@@ -44,6 +44,13 @@ class Prefs(context: Context) {
 
     /** Keep finished results in the in-app history. */
     /** Match the swapped face's colour to the target's own skin tone. */
+    /** Clones of the chosen model to run in parallel. 1 disables it. */
+    var clones: Int
+
+    var clones: Int
+        get() = sp.getInt("clones", 1).coerceIn(1, 4)
+        set(value) = sp.edit().putInt("clones", value.coerceIn(1, 4)).apply()
+
     var colorMatch: Boolean
         get() = sp.getBoolean("color_match", true)
         set(value) = sp.edit().putBoolean("color_match", value).apply()

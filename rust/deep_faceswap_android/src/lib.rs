@@ -13,7 +13,7 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jfloat, jint, jstring};
 use jni::JNIEnv;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use deep_faceswap_core::swap::{SwapOptions, SwapSession, SwapStage, MAX_PIXEL_BOOST};
 
@@ -27,7 +27,35 @@ static FACES_TOTAL: AtomicI32 = AtomicI32::new(0);
 
 /// Long-lived swap session used by the video pipeline, so the models and the
 /// source faces are loaded once rather than once per frame.
-static SESSION: Mutex<Option<SwapSession>> = Mutex::new(None);
+/// One session per clone of the model.
+///
+/// Each sits behind its own lock, so clones never contend with each other. They
+/// are clones of the *same* model on purpose: different models render faces
+/// differently, which would make the face change from frame to frame.
+static SESSIONS: Mutex<Vec<Arc<Mutex<SwapSession>>>> = Mutex::new(Vec::new());
+
+/// How many clones to load when a session is opened. Set by the app first.
+static WORKER_COUNT: AtomicI32 = AtomicI32::new(1);
+
+/// Each clone costs a full copy of the models, so this is deliberately small.
+const MAX_CLONES: i32 = 4;
+
+/// Run `f` against one clone. The outer lock is released before the swap so two
+/// workers can be inside the engine at the same time.
+fn with_session<T>(
+    worker: usize,
+    f: impl FnOnce(&mut SwapSession) -> Result<T, String>,
+) -> Result<T, String> {
+    let session = {
+        let guard = SESSIONS.lock().map_err(|_| "session lock poisoned".to_string())?;
+        guard
+            .get(worker)
+            .ok_or_else(|| format!("no clone {worker} is open"))?
+            .clone()
+    };
+    let mut held = session.lock().map_err(|_| "clone lock poisoned".to_string())?;
+    f(&mut held)
+}
 
 /// Colour matching for subsequent swaps.
 ///
@@ -454,24 +482,39 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionOpen(
     let landmark_opt = if landmark.is_empty() { None } else { Some(landmark.as_str()) };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        SwapSession::new(
-            &source,
-            &detector,
-            &recognizer,
-            &swapper,
-            enhancer_opt,
-            landmark_opt,
-            mouth_mask,
-        )
+        let count = WORKER_COUNT.load(Ordering::Relaxed).clamp(1, MAX_CLONES) as usize;
+        let mut built: Vec<Arc<Mutex<SwapSession>>> = Vec::with_capacity(count);
+        for _ in 0..count {
+            let session = SwapSession::new(
+                &source,
+                &detector,
+                &recognizer,
+                &swapper,
+                enhancer_opt,
+                landmark_opt,
+                mouth_mask,
+            )
+            .map_err(|e| e.to_string())?;
+            built.push(Arc::new(Mutex::new(session)));
+        }
+        let faces = match built.first() {
+            Some(first) => first.lock().map(|s| s.source_face_count()).unwrap_or(0),
+            None => 0,
+        };
+        Ok::<_, String>((built, faces))
     }));
 
     let payload = match result {
-        Ok(Ok(session)) => {
-            let faces = session.source_face_count();
-            match SESSION.lock() {
+        Ok(Ok((built, faces))) => {
+            match SESSIONS.lock() {
                 Ok(mut guard) => {
-                    *guard = Some(session);
-                    serde_json::json!({ "ok": true, "source_faces": faces }).to_string()
+                    *guard = built;
+                    serde_json::json!({
+                        "ok": true,
+                        "source_faces": faces,
+                        "clones": guard.len(),
+                    })
+                    .to_string()
                 }
                 Err(_) => serde_json::json!({
                     "ok": false,
@@ -532,15 +575,11 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
     };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut guard = SESSION
-            .lock()
-            .map_err(|_| "session lock poisoned".to_string())?;
-        let session = guard
-            .as_mut()
-            .ok_or_else(|| "no swap session is open".to_string())?;
-        session
-            .swap_frame(&frame_in, &frame_out, opts, &pairs)
-            .map_err(|e| e.to_string())
+        with_session(0, |session| {
+            session
+                .swap_frame(&frame_in, &frame_out, opts, &pairs)
+                .map_err(|e| e.to_string())
+        })
     }));
 
     let payload = match result {
@@ -603,15 +642,11 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut guard = SESSION
-            .lock()
-            .map_err(|_| "session lock poisoned".to_string())?;
-        let session = guard
-            .as_mut()
-            .ok_or_else(|| "no swap session is open".to_string())?;
-        session
-            .swap_frame_rgba(w, h, &input, opts, &pairs)
-            .map_err(|e| e.to_string())
+        with_session(0, |session| {
+            session
+                .swap_frame_rgba(w, h, &input, opts, &pairs)
+                .map_err(|e| e.to_string())
+        })
     }));
 
     // A null return means "keep the original frame" on the Kotlin side.
@@ -622,6 +657,81 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
         },
         _ => std::ptr::null_mut(),
     }
+}
+
+/// Swap a frame on a named clone.
+///
+/// The app runs one thread per clone, so this is what actually gives the
+/// parallelism: the clones are independent, each with its own copy of the model.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFrameRawWorker(
+    mut env: JNIEnv,
+    _class: JClass,
+    worker: jint,
+    width: jint,
+    height: jint,
+    frame: JByteArray,
+    mappings: JString,
+    use_mouth_mask: jboolean,
+    pixel_boost: jint,
+    enhancer_strength: jfloat,
+) -> jbyteArray {
+    let mapping_spec = jstring_to_string(&mut env, &mappings);
+    let pairs: Vec<(usize, usize)> = mapping_spec
+        .split(',')
+        .filter(|pair| !pair.trim().is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.split(':');
+            let source_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            let target_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            Some((source_idx, target_idx))
+        })
+        .collect();
+
+    let opts = SwapOptions {
+        use_mouth_mask: use_mouth_mask != 0,
+        use_multi_face: pairs.is_empty(),
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
+        enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
+        color_match: COLOR_MATCH.load(Ordering::Relaxed),
+    };
+
+    let input = match env.convert_byte_array(&frame) {
+        Ok(bytes) => bytes,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let w = width.max(0) as usize;
+    let h = height.max(0) as usize;
+    if w == 0 || h == 0 || input.len() < w * h * 4 {
+        return std::ptr::null_mut();
+    }
+
+    let index = worker.max(0) as usize;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_session(index, |session| {
+            session
+                .swap_frame_rgba(w, h, &input, opts, &pairs)
+                .map_err(|e| e.to_string())
+        })
+    }));
+
+    match result {
+        Ok(Ok((bytes, _faces))) => match env.byte_array_from_slice(&bytes) {
+            Ok(array) => array.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// How many clones to load on the next `sessionOpen`.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setCloneCount(
+    _env: JNIEnv,
+    _class: JClass,
+    count: jint,
+) {
+    WORKER_COUNT.store(count.clamp(1, MAX_CLONES), Ordering::Relaxed);
 }
 
 /// Turn colour matching on or off for subsequent swaps.
@@ -640,9 +750,9 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionClose(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    let payload = match SESSION.lock() {
+    let payload = match SESSIONS.lock() {
         Ok(mut guard) => {
-            *guard = None;
+            guard.clear();
             serde_json::json!({ "ok": true }).to_string()
         }
         Err(_) => serde_json::json!({ "ok": false, "error": "session lock poisoned" }).to_string(),

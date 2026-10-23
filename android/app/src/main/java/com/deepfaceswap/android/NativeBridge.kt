@@ -90,6 +90,9 @@ object NativeBridge {
         IDLE, LOADING_MODELS, LOADING_SOURCE, DETECTING, SWAPPING, SAVING, DONE;
 
         companion object {
+        /** Mirrors the engine's own cap: each clone is a full copy of the models. */
+        const val MAX_CLONES = 4
+
             fun from(code: Int): Stage = when (code) {
                 0 -> LOADING_MODELS
                 1 -> LOADING_SOURCE
@@ -304,6 +307,19 @@ object NativeBridge {
 
     private external fun setColorMatchNative(enabled: Boolean)
 
+    private external fun sessionSwapFrameRawWorker(
+        worker: Int,
+        width: Int,
+        height: Int,
+        frame: ByteArray,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): ByteArray?
+
+    private external fun setCloneCount(count: Int)
+
     private external fun sessionSwapFrameRaw(
         width: Int,
         height: Int,
@@ -388,6 +404,38 @@ object NativeBridge {
         enhancerStrength: Float,
     ): ByteArray? = runCatching {
         sessionSwapFrameRaw(width, height, frame, mappings, useMouthMask, pixelBoost, enhancerStrength)
+    }.getOrNull()
+
+    /**
+     * How many clones of the chosen model to load on the next session.
+     *
+     * Each clone holds its own full copy of the models, so this costs memory in
+     * proportion to the count. Set before opening a session; it has no effect on
+     * one already open.
+     */
+    fun setCloneCount(count: Int) {
+        runCatching { setCloneCount(count.coerceIn(1, MAX_CLONES)) }
+    }
+
+    /**
+     * Swap a frame on one of the clones.
+     *
+     * The app runs a thread per clone, which is what actually parallelises the
+     * work: each clone is independent.
+     */
+    fun swapSessionFrameRawWorker(
+        worker: Int,
+        width: Int,
+        height: Int,
+        frame: ByteArray,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): ByteArray? = runCatching {
+        sessionSwapFrameRawWorker(
+            worker, width, height, frame, mappings, useMouthMask, pixelBoost, enhancerStrength,
+        )
     }.getOrNull()
 
     /**
