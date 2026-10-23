@@ -1677,8 +1677,24 @@ impl SwapSession {
         let img = img_io::load_image(frame_in)?;
         let rgb_img = img_io::to_rgb8(&img);
         let mut array = rgb::rgb_to_array3(&rgb_img);
+        let swapped = self.swap_array(&mut array, opts, mappings)?;
+        let out_rgb = rgb::array3_to_rgb(&array);
+        img_io::save_image(&out_rgb, frame_out)?;
+        Ok(swapped)
+    }
 
-        let target_faces = self.detector.detect(&array, 0.5, 0.4)?;
+    /// Swap a frame that is already in memory.
+    ///
+    /// Both transfer formats funnel through here, so the file path and the
+    /// buffer path cannot drift apart.
+    pub fn swap_array(
+        &mut self,
+        array: &mut Array3<u8>,
+        opts: SwapOptions,
+        mappings: &[(usize, usize)],
+    ) -> Result<usize> {
+
+        let target_faces = self.detector.detect(array, 0.5, 0.4)?;
         if target_faces.is_empty() {
             img_io::save_image(&rgb_img, frame_out)?;
             return Ok(0);
@@ -1730,7 +1746,7 @@ impl SwapSession {
             all_source_faces,
             &target_faces,
             source_images,
-            &mut array,
+            array,
             &pairs,
             recognizer,
             swapper,
@@ -1740,8 +1756,42 @@ impl SwapSession {
             &mut |_, _, _| {},
         )?;
 
-        let out_rgb = rgb::array3_to_rgb(&array);
-        img_io::save_image(&out_rgb, frame_out)?;
         Ok(swapped)
+    }
+
+    /// Swap a frame handed over as RGBA bytes and give RGBA bytes back.
+    ///
+    /// This is the video path. It replaces four PNG operations per frame — an
+    /// encode and a decode on each side of the call — with two memory copies,
+    /// which is the single largest saving available per frame.
+    pub fn swap_frame_rgba(
+        &mut self,
+        width: usize,
+        height: usize,
+        rgba: &[u8],
+        opts: SwapOptions,
+        mappings: &[(usize, usize)],
+    ) -> Result<(Vec<u8>, usize)> {
+        let mut array = Array3::<u8>::zeros((height, width, 3));
+        for y in 0..height {
+            for x in 0..width {
+                let src = (y * width + x) * 4;
+                array[[y, x, 0]] = rgba[src];
+                array[[y, x, 1]] = rgba[src + 1];
+                array[[y, x, 2]] = rgba[src + 2];
+            }
+        }
+        let swapped = self.swap_array(&mut array, opts, mappings)?;
+        let mut out = vec![0u8; width * height * 4];
+        for y in 0..height {
+            for x in 0..width {
+                let dst = (y * width + x) * 4;
+                out[dst] = array[[y, x, 0]];
+                out[dst + 1] = array[[y, x, 1]];
+                out[dst + 2] = array[[y, x, 2]];
+                out[dst + 3] = 255;
+            }
+        }
+        Ok((out, swapped))
     }
 }

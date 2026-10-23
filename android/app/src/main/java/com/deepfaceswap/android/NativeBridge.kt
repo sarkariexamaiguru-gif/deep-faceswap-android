@@ -302,6 +302,16 @@ object NativeBridge {
         enhancerStrength: Float,
     ): String
 
+    private external fun sessionSwapFrameRaw(
+        width: Int,
+        height: Int,
+        frame: ByteArray,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): ByteArray?
+
     private external fun sessionClose(): String
 
     /** Result of opening a swap session. */
@@ -358,6 +368,25 @@ object NativeBridge {
         }.getOrNull() ?: return SwapResult(false, "native frame call failed")
         return parse(json)
     }
+
+    /**
+     * Swap one frame handed over as raw RGBA bytes.
+     *
+     * Returns the swapped RGBA bytes, or null if the engine could not run — the
+     * caller then keeps the original frame. This skips the PNG round-trip the
+     * file-based call needs, which is the bulk of the per-frame overhead.
+     */
+    fun swapSessionFrameRaw(
+        width: Int,
+        height: Int,
+        frame: ByteArray,
+        mappings: String,
+        useMouthMask: Boolean,
+        pixelBoost: Int,
+        enhancerStrength: Float,
+    ): ByteArray? = runCatching {
+        sessionSwapFrameRaw(width, height, frame, mappings, useMouthMask, pixelBoost, enhancerStrength)
+    }.getOrNull()
 
     /** Release the session and free its models. Safe to call when none is open. */
     fun closeSession() {

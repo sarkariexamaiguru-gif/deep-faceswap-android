@@ -9,8 +9,8 @@
 //! { "ok": false, "error": "No faces detected in image" }
 //! ```
 
-use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jfloat, jint, jstring};
+use jni::objects::{JByteArray, JClass, JString};
+use jni::sys::{jboolean, jbyteArray, jfloat, jint, jstring};
 use jni::JNIEnv;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
@@ -544,6 +544,73 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
     };
 
     to_jstring(&mut env, payload)
+}
+
+/// Swap one frame handed over as raw RGBA bytes, returning RGBA bytes.
+///
+/// The video path uses this instead of `sessionSwapFrame`: it removes four PNG
+/// operations per frame (encode and decode on each side of the call).
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFrameRaw(
+    mut env: JNIEnv,
+    _class: JClass,
+    width: jint,
+    height: jint,
+    frame: JByteArray,
+    mappings: JString,
+    use_mouth_mask: jboolean,
+    pixel_boost: jint,
+    enhancer_strength: jfloat,
+) -> jbyteArray {
+    let mapping_spec = jstring_to_string(&mut env, &mappings);
+    let pairs: Vec<(usize, usize)> = mapping_spec
+        .split(',')
+        .filter(|pair| !pair.trim().is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.split(':');
+            let source_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            let target_idx = parts.next()?.trim().parse::<usize>().ok()?;
+            Some((source_idx, target_idx))
+        })
+        .collect();
+
+    let opts = SwapOptions {
+        use_mouth_mask: use_mouth_mask != 0,
+        use_multi_face: pairs.is_empty(),
+        pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
+        enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
+    };
+
+    let input = match env.convert_byte_array(&frame) {
+        Ok(bytes) => bytes,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let w = width.max(0) as usize;
+    let h = height.max(0) as usize;
+    if w == 0 || h == 0 || input.len() < w * h * 4 {
+        return std::ptr::null_mut();
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut guard = SESSION
+            .lock()
+            .map_err(|_| "session lock poisoned".to_string())?;
+        let session = guard
+            .as_mut()
+            .ok_or_else(|| "no swap session is open".to_string())?;
+        session
+            .swap_frame_rgba(w, h, &input, opts, &pairs)
+            .map_err(|e| e.to_string())
+    }));
+
+    // A null return means "keep the original frame" on the Kotlin side.
+    match result {
+        Ok(Ok((bytes, _faces))) => match env.byte_array_from_slice(&bytes) {
+            Ok(array) => array.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        _ => std::ptr::null_mut(),
+    }
 }
 
 /// Release the swap session and free its models.

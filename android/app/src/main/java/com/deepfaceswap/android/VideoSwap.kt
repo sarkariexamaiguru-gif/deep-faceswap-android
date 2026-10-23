@@ -116,8 +116,6 @@ class VideoSwap(private val context: Context) {
 
             frameDir.deleteRecursively()
             frameDir.mkdirs()
-            val inFile = File(frameDir, "in.png")
-            val outFile = File(frameDir, "out.png")
 
             val bufferInfo = MediaCodec.BufferInfo()
             val mappingSpec = mappings.joinToString(",") { "${it.first}:${it.second}" }
@@ -179,7 +177,7 @@ class VideoSwap(private val context: Context) {
                         val item = decodeOut.take()
                         if (item.index < 0) break
                         val swapped = swapOneFrame(
-                            item.frame!!, inFile, outFile, mappingSpec,
+                            item.frame!!, mappingSpec,
                             useMouthMask, pixelBoost, enhancerStrength,
                         )
                         swapOut.put(Frame(item.index, item.timeUs, swapped))
@@ -253,31 +251,40 @@ class VideoSwap(private val context: Context) {
     // ------------------------------------------------------------ per frame --
 
     /** Send one frame through native, falling back to the original on failure. */
+    /**
+     * Send one frame through the engine, falling back to the original on failure.
+     *
+     * The frame crosses as raw RGBA rather than as a PNG file: that removes an
+     * encode and a decode on each side of the call, which dominated the time
+     * spent per frame.
+     */
     private fun swapOneFrame(
         frame: Bitmap,
-        inFile: File,
-        outFile: File,
         mappingSpec: String,
         useMouthMask: Boolean,
         pixelBoost: Int,
         enhancerStrength: Float,
     ): Bitmap {
         return try {
-            FileOutputStream(inFile).use { frame.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            val result = NativeBridge.swapSessionFrame(
-                inFile.absolutePath, outFile.absolutePath, mappingSpec,
-                useMouthMask, pixelBoost, enhancerStrength,
-            )
-            if (result.ok) {
-                BitmapFactory.decodeFile(outFile.absolutePath) ?: frame
-            } else {
-                frame
+            if (frame.config != Bitmap.Config.ARGB_8888) {
+                return frame.copy(Bitmap.Config.ARGB_8888, false) ?: frame
             }
+            val width = frame.width
+            val height = frame.height
+            val input = ByteBuffer.allocate(width * height * 4)
+            frame.copyPixelsToBuffer(input)
+
+            val swapped = NativeBridge.swapSessionFrameRaw(
+                width, height, input.array(), mappingSpec,
+                useMouthMask, pixelBoost, enhancerStrength,
+            ) ?: return frame
+            if (swapped.size < width * height * 4) return frame
+
+            val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            out.copyPixelsFromBuffer(ByteBuffer.wrap(swapped))
+            out
         } catch (e: Throwable) {
             frame
-        } finally {
-            inFile.delete()
-            outFile.delete()
         }
     }
 
