@@ -196,7 +196,16 @@ class UpscaleActivity : Activity() {
         if (model.installed) return model.file
 
         runCatching {
-            manager.download(model) { message -> ui { statusView.text = message } }
+            manager.download(model) { progress ->
+                val message = when {
+                    progress.failed != null -> "Download failed: ${progress.failed}"
+                    progress.finished -> "Model ready"
+                    progress.percent >= 0 ->
+                        "Downloading ${progress.label} — ${progress.percent}% (${progress.text})"
+                    else -> "Downloading ${progress.label} — ${progress.text}"
+                }
+                ui { statusView.text = message }
+            }
         }
         return if (model.installed) model.file else null
     }
