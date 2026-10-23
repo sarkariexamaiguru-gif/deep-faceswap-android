@@ -92,7 +92,7 @@ class MainActivity : Activity() {
     private var switcherRow: LinearLayout? = null
     private lateinit var navRow: LinearLayout
     private val screens = linkedMapOf<String, View>()
-    private var current = "swap"
+    private var current = "home"
 
     // Swap UI
     private lateinit var swapSource: Upload
@@ -151,13 +151,14 @@ class MainActivity : Activity() {
         setContentView(buildShell())
         SwapBus.addListener(swapListener)
 
+        screens["home"] = buildHomeScreen().also { content.addView(it) }
         screens["swap"] = buildSwapScreen().also { content.addView(it) }
         screens["video"] = buildVideoScreen().also { content.addView(it) }
         screens["history"] = buildHistoryScreen().also { content.addView(it) }
         screens["settings"] = buildSettingsScreen().also { content.addView(it) }
         screens["tools"] = buildToolsScreen().also { content.addView(it) }
 
-        show("swap")
+        show("home")
     }
 
     override fun onDestroy() {
@@ -334,6 +335,7 @@ class MainActivity : Activity() {
     private fun renderNav() {
         navRow.removeAllViews()
         listOf(
+            "home" to ("Home" to R.drawable.ic_sparkle),
             "swap" to ("Swap" to R.drawable.ic_swap),
             "video" to ("Video" to R.drawable.ic_video),
             "history" to ("History" to R.drawable.ic_history),
@@ -375,6 +377,7 @@ class MainActivity : Activity() {
         // Settings is not a peer of the work modes, so the switcher steps aside.
         switcherRow?.visibility = if (key == "settings") View.GONE else View.VISIBLE
         when (key) {
+            "home" -> Unit
             "history" -> renderHistory()
             "settings" -> renderSettings()
             "swap" -> refreshSwap()
@@ -955,6 +958,131 @@ class MainActivity : Activity() {
         col.addView(toolCard(R.drawable.ic_info, "Help & Guide",
             "Source vs target, formats, limits") { showHelp() })
         return scrollPage(col)
+    }
+
+    /**
+     * Home: the tools, not one of them.
+     *
+     * The app used to open on Face Swap, which made it a face swap app with
+     * extras bolted on - the name and the logo changed but the shape never did.
+     * It opens on everything it can do now: the finished tools first, and the
+     * rest labelled honestly rather than hidden.
+     */
+    private fun buildHomeScreen(): View {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(RoopUi.screenTitle(this, "What are we making?"))
+        col.addView(RoopUi.body(this, "Every tool runs on this phone. Nothing is uploaded.")
+            .apply {
+                layoutParams = RoopUi.margin(this@MainActivity,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    0, 4, 0, 4)
+            })
+
+        col.addView(homeSection("Ready now"))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_sliders, "Edit a photo", "Crop, light, colour, sharpen", true) {
+                startActivity(Intent(this@MainActivity, EditActivity::class.java))
+            },
+            homeTile(R.drawable.ic_swap, "Face Swap", "One face onto another", true) {
+                show("swap")
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_video, "Swap a video", "Frame by frame, audio kept", true) {
+                show("video")
+            },
+            null,
+        ))
+
+        col.addView(homeSection("Fix and sharpen"))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_hd, "Upscale", "4x, sharper edges", false) { notYet("Upscale") },
+            homeTile(R.drawable.ic_sparkle, "Remove blur", "Soft and motion-blurred shots", false) {
+                notYet("Remove blur")
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_filter, "Denoise", "Grain and phone noise", false) {
+                notYet("Denoise")
+            },
+            homeTile(R.drawable.ic_star, "Restore", "Old photos, faces and detail", false) {
+                notYet("Restore")
+            },
+        ))
+
+        col.addView(homeSection("Cut and erase"))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_person, "Cut out", "Drop the background", false) {
+                notYet("Cut out")
+            },
+            homeTile(R.drawable.ic_trash, "Erase", "Paint it out, it fills in", false) {
+                notYet("Erase")
+            },
+        ))
+        col.addView(homeRow(
+            homeTile(R.drawable.ic_image, "Swap background", "Put the subject elsewhere", false) {
+                notYet("Swap background")
+            },
+            homeTile(R.drawable.ic_palette, "Colourise", "Black and white to colour", false) {
+                notYet("Colourise")
+            },
+        ))
+
+        return scrollPage(col)
+    }
+
+    private fun homeSection(title: String): View =
+        RoopUi.text(this, title.uppercase(), 11f, R.color.ink_muted, 1).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 2, 16, 0, 8)
+        }
+
+    private fun homeRow(left: View, right: View?): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(left, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(android.view.View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(12), 1)
+        })
+        if (right != null) {
+            row.addView(right, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        } else {
+            row.addView(android.view.View(this),
+                RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        return row
+    }
+
+    private fun homeTile(iconRes: Int, title: String, subtitle: String, ready: Boolean,
+                         onClick: () -> Unit): View {
+        val card = RoopUi.card(this)
+        card.addView(RoopUi.softTile(this, iconRes,
+            if (ready) R.color.blue else R.color.ink_muted))
+        card.addView(RoopUi.cardTitle(this, title).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0)
+        })
+        card.addView(RoopUi.meta(this, subtitle).apply { minLines = 2 })
+        card.addView(RoopUi.text(this, if (ready) "Ready" else "Coming", 10f,
+            if (ready) R.color.success else R.color.ink_muted, 1).apply {
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0)
+        })
+        card.isClickable = true
+        card.contentDescription = title
+        card.setOnClickListener { onClick() }
+        RoopUi.pressScale(card)
+        return card
+    }
+
+    /** Say plainly that a tool is designed but not built, rather than pretend. */
+    private fun notYet(name: String) {
+        showSheet(
+            name,
+            listOf("Not built yet"),
+            -1,
+            listOf("The tool is designed and its model is chosen, but there is no screen for it yet. " +
+                "The ones marked Ready work today."),
+        ) { }
     }
 
     private fun toolCard(iconRes: Int, title: String, subtitle: String,
