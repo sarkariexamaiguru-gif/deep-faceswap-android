@@ -58,6 +58,12 @@ class VideoSwap(private val context: Context) {
         onMessage: (String) -> Unit,
         onFrame: (Int, Int) -> Unit,
     ): Result {
+        // Reported with any failure, so the message says where it broke rather
+        // than only what threw.
+        var stage = "reading the file"
+        swapFailure.set(null)
+        swapFailures.set(0)
+        swapAttempts.set(0)
         var extractor: MediaExtractor? = null
         var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
@@ -79,17 +85,22 @@ class VideoSwap(private val context: Context) {
             val height = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
             val frameRate = optInt(videoFormat, MediaFormat.KEY_FRAME_RATE, 30).coerceIn(1, 120)
 
+            stage = "reading the video track"
             val durationMs = probeDurationMs(input)
             val estimated = if (durationMs > 0) ((durationMs / 1000.0) * frameRate).toInt() else 0
             if (estimated > MAX_FRAMES) {
+                val minutes = estimated / frameRate / 60.0
                 return Result(
                     false, 0,
-                    "About $estimated frames — the limit is $MAX_FRAMES. Try a shorter clip.",
+                    "That clip is about $estimated frames (roughly " +
+                        String.format(java.util.Locale.US, "%.1f", minutes) +
+                        " min), past the $MAX_FRAMES-frame limit. Trim it and try again.",
                 )
             }
 
             // ---- native session: models and source faces loaded once
-            onMessage("Loading models …")
+            stage = "loading the models"
+            onMessage("Loading models \u2026")
             val session = NativeBridge.openSession(context, sourcePaths, swapperFile, useMouthMask)
             if (!session.ok) {
                 return Result(false, 0, session.error ?: "Could not open the swap session")
@@ -119,6 +130,7 @@ class VideoSwap(private val context: Context) {
             frameDir.deleteRecursively()
             frameDir.mkdirs()
 
+            stage = "decoding, swapping and encoding"
             val bufferInfo = MediaCodec.BufferInfo()
             val mappingSpec = mappings.joinToString(",") { "${it.first}:${it.second}" }
 
@@ -223,8 +235,24 @@ class VideoSwap(private val context: Context) {
             swapThreads.forEach { it.join() }
             failure.get()?.let { throw it }
 
+            val attempts = swapAttempts.get()
+            val failedFrames = swapFailures.get()
+            if (attempts > 0 && failedFrames == attempts) {
+                // Every frame came back untouched: something is wrong with the
+                // engine rather than with one frame, so say so plainly.
+                return Result(
+                    false, 0,
+                    "The engine could not swap any frame: " +
+                        (swapFailure.get() ?: "no reason reported"),
+                )
+            }
+            if (failedFrames > 0) {
+                onMessage("$failedFrames frame(s) could not be swapped and were left as they were")
+            }
+
             // ---- flush the encoder
-            onMessage("Finishing video …")
+            stage = "finishing the file"
+            onMessage("Finishing video \u2026")
             while (!drainEncoder(encoder, muxer, bufferInfo, trackRef, startedRef, true)) {
                 // keep draining until the end-of-stream buffer comes out
             }
@@ -236,13 +264,19 @@ class VideoSwap(private val context: Context) {
             // ---- audio passthrough
             // Audio is copied through untouched, unless the user asked for silence.
             if (audioTrack >= 0 && keepAudio) {
-                copyAudio(extractor, audioTrack, muxer)
+                // Losing the audio track should not lose the whole video.
+                runCatching { copyAudio(extractor, audioTrack, muxer) }
+                    .onFailure { onMessage("The audio track could not be copied \u2014 the result is silent.") }
             }
 
             return Result(true, frames, null)
         } catch (e: Throwable) {
             // Never let a media failure take the app down: report it instead.
-            return Result(false, 0, "${e.javaClass.simpleName}: ${e.message ?: "video swap failed"}")
+            return Result(
+                false, 0,
+                "Failed while $stage \u2014 ${e.javaClass.simpleName}: " +
+                    (e.message ?: "no detail"),
+            )
         } finally {
             decodeThread?.interrupt()
             swapThreads.forEach { it.interrupt() }
@@ -259,6 +293,11 @@ class VideoSwap(private val context: Context) {
     }
 
     // --------------------------------------------------------------- pipeline --
+
+    /** Reset per swap: what went wrong, and how often. */
+    private val swapFailure = java.util.concurrent.atomic.AtomicReference<String?>(null)
+    private val swapFailures = java.util.concurrent.atomic.AtomicInteger(0)
+    private val swapAttempts = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** One frame moving between pipeline stages. [index] < 0 marks the end. */
     private class Frame(val index: Int, val timeUs: Long, val frame: Bitmap?)
@@ -331,9 +370,15 @@ class VideoSwap(private val context: Context) {
             frame.copyPixelsToBuffer(input)
 
             val bytes = input.array()
+            swapAttempts.incrementAndGet()
             val swapped = if (workers > 1) {
+                // If a clone cannot serve the frame, fall back to the primary
+                // session rather than dropping the frame.
                 NativeBridge.swapSessionFrameRawWorker(
                     worker, width, height, bytes, mappingSpec,
+                    useMouthMask, pixelBoost, enhancerStrength,
+                ) ?: NativeBridge.swapSessionFrameRaw(
+                    width, height, bytes, mappingSpec,
                     useMouthMask, pixelBoost, enhancerStrength,
                 )
             } else {
@@ -341,13 +386,21 @@ class VideoSwap(private val context: Context) {
                     width, height, bytes, mappingSpec,
                     useMouthMask, pixelBoost, enhancerStrength,
                 )
-            } ?: return frame
-            if (swapped.size < width * height * 4) return frame
+            }
+            if (swapped == null || swapped.size < width * height * 4) {
+                swapFailures.incrementAndGet()
+                swapFailure.compareAndSet(null, "the engine returned no frame")
+                return frame
+            }
 
             val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             out.copyPixelsFromBuffer(ByteBuffer.wrap(swapped))
             out
         } catch (e: Throwable) {
+            swapFailures.incrementAndGet()
+            swapFailure.compareAndSet(
+                null, "${e.javaClass.simpleName}: ${e.message ?: "frame swap failed"}",
+            )
             frame
         }
     }
@@ -676,6 +729,6 @@ class VideoSwap(private val context: Context) {
         const val AUDIO_BUFFER = 256 * 1024
 
         /** Roughly a minute at 20fps; longer clips would take far too long on a phone. */
-        const val MAX_FRAMES = 1200
+        const val MAX_FRAMES = 3000
     }
 }

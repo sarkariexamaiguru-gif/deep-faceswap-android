@@ -46,7 +46,15 @@ class SwapService : Service() {
         }
         if (worker?.isAlive == true) return START_NOT_STICKY
 
-        startForeground(NOTIFICATION_ID, buildNotification(SwapBus.state))
+        // A foreground service is what keeps the process alive through a long job.
+        // If the platform refuses it, carry on without one rather than dropping
+        // the work - a missing notification is better than a failed swap.
+        runCatching { startForeground(NOTIFICATION_ID, buildNotification(SwapBus.state)) }
+            .onFailure {
+                SwapBus.update { state ->
+                    state.copy(message = "Running without a background notification.")
+                }
+            }
         worker = Thread({ run(job) }, "roop-service").also { it.start() }
         return START_NOT_STICKY
     }
