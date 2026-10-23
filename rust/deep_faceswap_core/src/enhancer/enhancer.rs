@@ -91,6 +91,8 @@ impl FaceEnhancer {
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
+            .with_intra_threads(crate::config::intra_threads())
+            .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .commit_from_file(model_path)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?;
 
@@ -100,6 +102,8 @@ impl FaceEnhancer {
             .with_log_level(ort_log_level)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
+            .with_intra_threads(crate::config::intra_threads())
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .commit_from_file(model_path)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?;

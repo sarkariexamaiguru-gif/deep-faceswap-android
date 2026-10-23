@@ -12,6 +12,7 @@
 //! `video` feature (enabled by default). Android builds disable it to avoid the
 //! FFmpeg dependency.
 
+pub mod config;
 pub mod types;
 
 pub mod alignment;

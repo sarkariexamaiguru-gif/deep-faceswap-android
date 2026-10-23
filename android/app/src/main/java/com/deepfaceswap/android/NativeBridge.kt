@@ -11,7 +11,7 @@ import org.json.JSONObject
  * Each clone is a full copy of the models in memory, so the ceiling is
  * deliberately low - it mirrors the engine's own cap.
  */
-const val MAX_MODEL_CLONES = 4
+const val MAX_MODEL_CLONES = 8
 
 /**
  * Thin Kotlin wrapper over the Rust JNI bridge (`libdeep_faceswap_android.so`).

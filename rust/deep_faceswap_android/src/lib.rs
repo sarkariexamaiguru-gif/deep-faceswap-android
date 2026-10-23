@@ -38,7 +38,7 @@ static SESSIONS: Mutex<Vec<Arc<Mutex<SwapSession>>>> = Mutex::new(Vec::new());
 static WORKER_COUNT: AtomicI32 = AtomicI32::new(1);
 
 /// Each clone costs a full copy of the models, so this is deliberately small.
-const MAX_CLONES: i32 = 4;
+const MAX_CLONES: i32 = 8;
 
 /// Run `f` against one clone. The outer lock is released before the swap so two
 /// workers can be inside the engine at the same time.
@@ -731,7 +731,18 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setCloneCountN
     _class: JClass,
     count: jint,
 ) {
-    WORKER_COUNT.store(count.clamp(1, MAX_CLONES), Ordering::Relaxed);
+    let clones = count.clamp(1, MAX_CLONES);
+    WORKER_COUNT.store(clones, Ordering::Relaxed);
+
+    // Split the cores between the clones. ONNX Runtime defaults every session to
+    // "use all cores", so N clones left alone spawn N pools over the same cores
+    // and spend the time contending - which can be slower than a single clone.
+    // One clone keeps the default (0 = let ORT decide).
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(4);
+    let per_clone = if clones <= 1 { 0 } else { (cores / clones).max(1) };
+    deep_faceswap_core::config::set_intra_threads(per_clone);
 }
 
 /// Turn colour matching on or off for subsequent swaps.

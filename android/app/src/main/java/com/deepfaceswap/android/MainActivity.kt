@@ -890,16 +890,28 @@ class MainActivity : Activity() {
             if (prefs.clones > 1) "${prefs.clones}\u00D7" else "Off",
         ).apply {
             setOnClickListener {
+                val cores = Runtime.getRuntime().availableProcessors()
+                val info = android.app.ActivityManager.MemoryInfo()
+                getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(info)
+                val ramGb = info.totalMem / (1024.0 * 1024.0 * 1024.0)
+                val labels = (1..MAX_MODEL_CLONES).map {
+                    if (it == 1) "Off (1 clone)" else "$it clones"
+                }
+                val notes = (1..MAX_MODEL_CLONES).map { n ->
+                    if (n == 1) {
+                        "One session, all $cores cores. Least memory."
+                    } else {
+                        val perClone = (cores / n).coerceAtLeast(1)
+                        val ram = n * 0.45
+                        "$perClone thread${if (perClone == 1) "" else "s"} per clone \u00B7 " +
+                            "about ${String.format(java.util.Locale.US, "%.1f", ram)} GB of models"
+                    }
+                }
                 showSheet(
-                    "Model clones",
-                    listOf("Off (1)", "2 clones", "3 clones", "4 clones"),
+                    "Model clones \u00B7 ${cores} cores, ${String.format(java.util.Locale.US, "%.0f", ramGb)} GB RAM",
+                    labels,
                     prefs.clones - 1,
-                    listOf(
-                        "One session. Least memory.",
-                        "Two copies, working frames in parallel. Roughly 1.5x on the swap.",
-                        "Three copies. More memory again, smaller gain.",
-                        "Four copies. Needs a lot of RAM, and may be killed.",
-                    ),
+                    notes,
                 ) { pick ->
                     prefs.clones = pick + 1; refreshVideo()
                 }
