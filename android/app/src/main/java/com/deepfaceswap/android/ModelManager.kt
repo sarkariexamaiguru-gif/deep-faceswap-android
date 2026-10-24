@@ -115,6 +115,26 @@ class ModelManager(private val context: Context) {
             url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
         ),
         Model(
+            "Occlusion · xseg_2", XSEG_FILE, toolsDir, false, Source.URL,
+            url = XSEG_2_URL, approxSize = "1.5 MB", licence = "GPL-3.0",
+        ),
+        Model(
+            "Occlusion · xseg_1", "xseg_1.onnx", toolsDir, false, Source.URL,
+            url = XSEG_1_URL, approxSize = "1.5 MB", licence = "GPL-3.0",
+        ),
+        Model(
+            "Occlusion · xseg_3", "xseg_3.onnx", toolsDir, false, Source.URL,
+            url = XSEG_3_URL, approxSize = "1.5 MB", licence = "GPL-3.0",
+        ),
+        Model(
+            "Face parser · r34", BISENET_FILE, toolsDir, false, Source.URL,
+            url = BISENET_34_URL, approxSize = "85 MB", licence = "MIT",
+        ),
+        Model(
+            "Face parser · r18", "bisenet_resnet_18.onnx", toolsDir, false, Source.URL,
+            url = BISENET_18_URL, approxSize = "50 MB", licence = "MIT",
+        ),
+        Model(
             "Denoiser", SCUNET_FILE, toolsDir, false, Source.URL,
             url = SCUNET_URL, approxSize = "38 MB", licence = "Apache-2.0",
         ),
@@ -459,6 +479,13 @@ class ModelManager(private val context: Context) {
         /** JPEG artifact remover. */
         const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
 
+        /** Occlusion. XSeg says what is in front of the face so the swap can
+         *  leave it alone - the microphone, the hand, the sunglasses. */
+        const val XSEG_FILE = "xseg_2.onnx"
+
+        /** Semantic face parsing, for region masks. */
+        const val BISENET_FILE = "bisenet_resnet_34.onnx"
+
         /** General colour denoiser. */
         const val SCUNET_FILE = "scunet_color_real_gan_fp16.onnx"
 
@@ -481,6 +508,20 @@ class ModelManager(private val context: Context) {
         private const val FBCNN_URL =
             "https://huggingface.co/colpona/dejpeg-models/resolve/main/fbcnn/" +
                 "fbcnn_color_fp16.onnx"
+
+        // The facefusion-assets release train, which is where the whole
+        // FaceFusion model set lives. Version numbers differ per model and are
+        // not interchangeable.
+        private const val XSEG_1_URL =
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.1.0/xseg_1.onnx"
+        private const val XSEG_2_URL =
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.1.0/xseg_2.onnx"
+        private const val XSEG_3_URL =
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.2.0/xseg_3.onnx"
+        private const val BISENET_18_URL =
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.1.0/bisenet_resnet_18.onnx"
+        private const val BISENET_34_URL =
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/bisenet_resnet_34.onnx"
 
         private const val SCUNET_URL =
             "https://huggingface.co/colpona/dejpeg-models/resolve/main/scunet/" +

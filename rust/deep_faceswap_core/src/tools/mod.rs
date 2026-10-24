@@ -11,6 +11,7 @@
 
 pub mod edit;
 pub mod image2image;
+pub mod occlusion;
 pub mod segmentation;
 pub mod upscale;
 
