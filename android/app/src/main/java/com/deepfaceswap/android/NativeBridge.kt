@@ -321,6 +321,8 @@ object NativeBridge {
 
     private external fun qualityTimelineNative(): String
 
+    private external fun checkModelNative(path: String): String
+
     private external fun setLandmarkModelNative(path: String): String
 
     private external fun setInterpolationNative(path: String): String
@@ -544,6 +546,24 @@ object NativeBridge {
     /** Every frame's numbers for the current job, as JSON. */
     fun qualityTimeline(): String =
         runCatching { qualityTimelineNative() }.getOrDefault("{}")
+
+    /**
+     * Try to load one model file.
+     *
+     * Returns a pair: whether it loaded, and either its signature or the reason
+     * it would not. This is the check that turns "swap failed" into a file name
+     * and a sentence.
+     */
+    fun checkModel(path: String): Pair<Boolean, String> {
+        val raw = runCatching { checkModelNative(path) }.getOrDefault("{}")
+        val parsed = runCatching { org.json.JSONObject(raw) }.getOrNull()
+            ?: return false to "the native check did not answer"
+        return if (parsed.optBoolean("ok", false)) {
+            true to parsed.optString("detail", "")
+        } else {
+            false to parsed.optString("error", "it would not load")
+        }
+    }
 
     /**
      * Point the visibility check at an HRFFA model, or pass an empty path to

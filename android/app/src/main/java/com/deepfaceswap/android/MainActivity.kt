@@ -1564,6 +1564,62 @@ class MainActivity : Activity() {
         return (sumSquares / count) - mean * mean
     }
 
+    /**
+     * Load every model the pipeline will actually use, and say what happened.
+     *
+     * A swap failing gives one sentence and no way to tell which of six files
+     * was responsible. This loads each one and reports a name, a signature or a
+     * reason - so a failure stops being a symptom.
+     *
+     * It runs off the UI thread because loading a 300 MB model is seconds, and
+     * it deliberately checks what the pipeline WILL use rather than what is
+     * installed: with the small pack preferred, the interesting question is
+     * which file that resolution landed on.
+     */
+    private fun runHealthCheck() {
+        toast("Checking models\u2026")
+        Thread {
+            val checks = mutableListOf<Pair<String, String>>()
+            checks.add("Face detector" to models.detectorPath)
+            checks.add("Face recogniser" to models.recognizerPath)
+            checks.add("Face landmarker" to models.landmarkPath)
+            checks.add("Swapper" to models.swapperPath(swapperFile))
+            if (models.enhancerInstalled) {
+                checks.add("Face restorer" to models.enhancerPath)
+            }
+            val occluder = occlusionModelPath()
+            if (occluder.isNotEmpty()) checks.add("Occlusion mask" to occluder)
+            val landmarkModel = landmarkModelPath()
+            if (landmarkModel.isNotEmpty()) checks.add("Visibility" to landmarkModel)
+            val interpolator = interpolationModelPath()
+            if (interpolator.isNotEmpty()) checks.add("Interpolation" to interpolator)
+
+            val lines = mutableListOf<String>()
+            var failures = 0
+            checks.forEach { (role, path) ->
+                val name = File(path).name
+                val (ok, detail) = NativeBridge.checkModel(path)
+                if (ok) {
+                    lines.add("$role \u00b7 $name\n   OK \u00b7 $detail")
+                } else {
+                    failures++
+                    lines.add("$role \u00b7 $name\n   FAILED \u00b7 $detail")
+                }
+            }
+
+            val header = if (failures == 0) {
+                "All ${checks.size} models loaded."
+            } else {
+                "$failures of ${checks.size} models could not be loaded."
+            }
+            lines.add(0, header)
+
+            runOnUiThread {
+                showSheet("Model health", lines, -1, null) { }
+            }
+        }.start()
+    }
+
     /** The RIFE interpolation model if installed, otherwise an empty path. */
     private fun interpolationModelPath(): String =
         models.models()
@@ -3369,7 +3425,8 @@ class MainActivity : Activity() {
     private fun showOverflow() {
         showSheet(
             "More options",
-            listOf("Reset inputs", "Tools and diagnostics", "Settings", "Help & Guide"),
+            listOf("Reset inputs", "Model health check", "Tools and diagnostics",
+                "Settings", "Help & Guide"),
             -1, null,
         ) { pick ->
             when (pick) {
@@ -3379,8 +3436,9 @@ class MainActivity : Activity() {
                     refreshSwap(); refreshVideo()
                     toast("Selections reset")
                 }
-                1 -> show("tools")
-                2 -> show("settings")
+                1 -> runHealthCheck()
+                2 -> show("tools")
+                3 -> show("settings")
                 else -> showHelp()
             }
         }

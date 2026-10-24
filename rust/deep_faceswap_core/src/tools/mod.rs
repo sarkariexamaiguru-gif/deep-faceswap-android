@@ -11,6 +11,7 @@
 
 pub mod compositing;
 pub mod edit;
+pub mod health;
 pub mod image2image;
 pub mod interpolate;
 pub mod landmarks;

@@ -220,13 +220,26 @@ class ModelManager(private val context: Context) {
     // Prefer the small pack when it is installed. Same job, a thirteenth of the
     // size, and the identity number in the quality report is what proves whether
     // the trade was worth it - which is exactly why that report came first.
-    val detectorPath get() = preferred("det_500m.onnx", "det_10g.onnx")
-    val recognizerPath get() = preferred("w600k_mbf.onnx", "w600k_r50.onnx")
+    val detectorPath get() = preferred("det_500m.onnx", "det_10g.onnx", 500L * 1024)
+    val recognizerPath get() = preferred("w600k_mbf.onnx", "w600k_r50.onnx", 4L * 1024 * 1024)
 
-    /** The small file if it exists, otherwise the large one. */
-    private fun preferred(small: String, large: String): String {
+    /**
+     * The small file if it is usable, otherwise the large one.
+     *
+     * "Usable" means present AND plausibly complete. A download that stopped
+     * part-way leaves a file that exists and cannot be loaded, and preferring it
+     * would break every swap with no clue why - which is exactly what happened
+     * once already. The size floor is deliberately loose: it is here to catch a
+     * truncated file, not to police a model's size.
+     */
+    private fun preferred(small: String, large: String, floorBytes: Long): String {
         val smallFile = File(buffaloDir, small)
-        return if (smallFile.isFile) smallFile.absolutePath else File(buffaloDir, large).absolutePath
+        val largeFile = File(buffaloDir, large)
+        return if (smallFile.isFile && smallFile.length() >= floorBytes) {
+            smallFile.absolutePath
+        } else {
+            largeFile.absolutePath
+        }
     }
     val landmarkPath get() = File(buffaloDir, "2d106det.onnx").absolutePath
     val emapPath get() = File(modelsDir, "inswapper_128_emap.bin").absolutePath

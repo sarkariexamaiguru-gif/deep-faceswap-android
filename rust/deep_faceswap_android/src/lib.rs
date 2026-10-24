@@ -1093,6 +1093,30 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityTimelin
     }
 }
 
+/// Try to load one model file and say what happened.
+///
+/// This is the check that turns "swap failed" into a name and a reason. A
+/// truncated download, a wrong file, a model from another export pipeline - all
+/// of them fail here, at load, rather than somewhere deep in a pipeline where
+/// the only symptom is that nothing came out.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_checkModelNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jstring {
+    let text = jstring_to_string(&mut env, &path);
+    let payload = match deep_faceswap_core::tools::health::check(&text) {
+        Ok(detail) => serde_json::json!({ "ok": true, "detail": detail }),
+        Err(reason) => serde_json::json!({ "ok": false, "error": reason }),
+    }
+    .to_string();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// The quality report for the most recent frame, as JSON.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(
