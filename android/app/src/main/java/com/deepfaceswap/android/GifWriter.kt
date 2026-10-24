@@ -81,7 +81,9 @@ object GifWriter {
         }
         if (samples.isEmpty()) return IntArray(count) { it or (it shl 8) or (it shl 16) }
 
-        var boxes = listOf(samples)
+        // Annotated explicitly: `listOf(samples)` infers a list of ArrayLists, and
+        // the split boxes are plain Lists, which Kotlin will not mix.
+        var boxes: List<List<Int>> = listOf(samples)
         while (boxes.size < count) {
             val target = boxes.indexOfFirst { it.size > 1 }
             if (target < 0) break
@@ -92,7 +94,7 @@ object GifWriter {
                 removeAt(target)
                 add(split.first)
                 add(split.second)
-            }
+            }.toList()
         }
 
         val palette = IntArray(count)
