@@ -1805,20 +1805,96 @@ class MainActivity : Activity() {
     }
 
     private fun showItemSheet(item: HistoryManager.Item) {
-        val options = listOf("Preview", "Save to Gallery", "Share",
-            if (item.favorite) "Remove from Favorites" else "Add to Favorites", "Delete")
+        val isClip = isVideo(item.fileName)
+        val options = listOf("Preview", "Save to Gallery", "Share") +
+            (if (isClip) listOf("Save as GIF") else emptyList()) +
+            listOf(
+                if (item.favorite) "Remove from Favorites" else "Add to Favorites",
+                "Delete",
+            )
         showSheet(item.fileName, options, -1, null) { pick ->
             when (options[pick]) {
                 "Preview" -> previewItem(item)
                 "Save to Gallery" -> {
                     if (saveToGallery(item.file)) toast("Saved to Gallery") else toast("Could not save")
                 }
+                "Save as GIF" -> exportGif(item.file)
                 "Share" -> share(item.file)
                 "Add to Favorites", "Remove from Favorites" -> {
                     history.toggleFavorite(item.id); renderHistory()
                 }
                 "Delete" -> confirmDelete(setOf(item.id), "Delete this item?")
             }
+        }
+    }
+
+    /**
+     * Turn a finished clip into a GIF.
+     *
+     * MediaCodec cannot write GIF and the whole video path goes through it, so
+     * this samples the clip and encodes separately. Sixteen frames at 12 fps is
+     * about a second and a half of motion - enough to read as animation, short
+     * enough that the file stays a size anyone will send.
+     */
+    private fun exportGif(clip: File) {
+        toast("Building GIF\u2026")
+        Thread {
+            val frames = sampleForGif(clip)
+            if (frames.isEmpty()) {
+                runOnUiThread { toast("That clip could not be read") }
+                return@Thread
+            }
+            val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val out = File(outDir, "roop_$stamp.gif")
+            val ok = GifWriter.write(out, frames, 80)
+            runOnUiThread {
+                if (ok && out.isFile) {
+                    registerResult(out, clip, "GIF")
+                    toast("GIF saved")
+                } else {
+                    toast("Could not write the GIF")
+                }
+            }
+        }.start()
+    }
+
+    /** Evenly spaced frames, scaled so a GIF stays a sane size. */
+    private fun sampleForGif(clip: File): List<Bitmap> {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(clip.absolutePath)
+            val durationMs = retriever
+                .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            if (durationMs <= 0L) {
+                emptyList()
+            } else {
+                val count = 16
+                (0 until count).mapNotNull { index ->
+                    val us = (durationMs * 1000.0 * index / count).toLong()
+                    retriever
+                        .getFrameAtTime(us, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        ?.let { frame ->
+                            val longest = maxOf(frame.width, frame.height)
+                            if (longest <= 480) {
+                                frame
+                            } else {
+                                val scale = 480.0 / longest
+                                Bitmap.createScaledBitmap(
+                                    frame,
+                                    (frame.width * scale).toInt().coerceAtLeast(1),
+                                    (frame.height * scale).toInt().coerceAtLeast(1),
+                                    true,
+                                )
+                            }
+                        }
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        } finally {
+            runCatching { retriever.release() }
         }
     }
 
