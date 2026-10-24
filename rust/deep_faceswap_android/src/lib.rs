@@ -1159,7 +1159,9 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionClose(
             guard.clear();
             serde_json::json!({ "ok": true }).to_string()
         }
-        Err(payload) => serde_json::json!({ "ok": false, "error": format!("session lock poisoned: {}", panic_message(&payload)) }).to_string(),
+        // A poisoned mutex, not a panic: its error carries a MutexGuard, which
+        // is not Send, so it cannot go through the panic-payload path at all.
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("session lock poisoned: {e}") }).to_string(),
     };
     to_jstring(&mut env, payload)
 }
