@@ -36,6 +36,7 @@ class ModelManager(private val context: Context) {
     enum class Source {
         /** Entry inside the shared buffalo_l archive. */
         BUFFALO_ZIP,
+        BUFFALO_S_ZIP,
 
         /** Bundled in the APK and copied out on first use. */
         ASSET,
@@ -83,6 +84,15 @@ class ModelManager(private val context: Context) {
             approxSize = "166 MB", licence = "Non-commercial"),
         Model("Face landmarker", "2d106det.onnx", buffaloDir, true, Source.BUFFALO_ZIP, "2d106det.onnx",
             approxSize = "5 MB", licence = "Non-commercial"),
+        // The same two jobs as the pair above, at a thirteenth of the size. When
+        // these are installed the pipeline prefers them - see recognizerPath and
+        // detectorPath. The quality report is what says whether that was right.
+        Model("Face recogniser \u00b7 small", "w600k_mbf.onnx", buffaloDir, false,
+            Source.BUFFALO_S_ZIP, "w600k_mbf.onnx",
+            approxSize = "13 MB", licence = "Non-commercial"),
+        Model("Face detector \u00b7 small", "det_500m.onnx", buffaloDir, false,
+            Source.BUFFALO_S_ZIP, "det_500m.onnx",
+            approxSize = "2 MB", licence = "Non-commercial"),
         Model("Emap sidecar", "inswapper_128_emap.bin", modelsDir, true, Source.ASSET,
             approxSize = "1 MB", licence = "Non-commercial"),
         Model("Swapper · inswapper 128", "inswapper_128.onnx", modelsDir, true, Source.URL,
@@ -113,6 +123,10 @@ class ModelManager(private val context: Context) {
         Model(
             "De-JPEG", FBCNN_FILE, toolsDir, false, Source.URL,
             url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
+        ),
+        Model(
+            "Face restorer · GPEN", GPEN_FILE, modelsDir, false, Source.URL,
+            url = GPEN_URL, approxSize = "72 MB", licence = "Non-commercial",
         ),
         Model(
             "Occlusion · xseg_2", XSEG_FILE, toolsDir, false, Source.URL,
@@ -153,8 +167,17 @@ class ModelManager(private val context: Context) {
     )
 
     // Paths handed to the JNI bridge.
-    val detectorPath get() = File(buffaloDir, "det_10g.onnx").absolutePath
-    val recognizerPath get() = File(buffaloDir, "w600k_r50.onnx").absolutePath
+    // Prefer the small pack when it is installed. Same job, a thirteenth of the
+    // size, and the identity number in the quality report is what proves whether
+    // the trade was worth it - which is exactly why that report came first.
+    val detectorPath get() = preferred("det_500m.onnx", "det_10g.onnx")
+    val recognizerPath get() = preferred("w600k_mbf.onnx", "w600k_r50.onnx")
+
+    /** The small file if it exists, otherwise the large one. */
+    private fun preferred(small: String, large: String): String {
+        val smallFile = File(buffaloDir, small)
+        return if (smallFile.isFile) smallFile.absolutePath else File(buffaloDir, large).absolutePath
+    }
     val landmarkPath get() = File(buffaloDir, "2d106det.onnx").absolutePath
     val emapPath get() = File(modelsDir, "inswapper_128_emap.bin").absolutePath
     val enhancerPath get() = File(modelsDir, ENHANCER_FILE).absolutePath
@@ -260,6 +283,13 @@ class ModelManager(private val context: Context) {
                     .filter { it.source == Source.BUFFALO_ZIP }
                     .sumOf { it.expectedBytes }
                 downloadZip(BUFFALO_ZIP_URL, buffaloDir, BUFFALO_ENTRIES, "buffalo_l",
+                    expected, progress)
+            }
+            Source.BUFFALO_S_ZIP -> {
+                val expected = models()
+                    .filter { it.source == Source.BUFFALO_S_ZIP }
+                    .sumOf { it.expectedBytes }
+                downloadZip(BUFFALO_S_ZIP_URL, buffaloDir, BUFFALO_S_ENTRIES, "buffalo_s",
                     expected, progress)
             }
             Source.ASSET -> {
@@ -479,6 +509,9 @@ class ModelManager(private val context: Context) {
         /** JPEG artifact remover. */
         const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
 
+        /** A smaller face restorer: a quarter of GFPGAN's size for the same job. */
+        const val GPEN_FILE = "GPEN-BFR-256.onnx"
+
         /** Occlusion. XSeg says what is in front of the face so the swap can
          *  leave it alone - the microphone, the hand, the sunglasses. */
         const val XSEG_FILE = "xseg_2.onnx"
@@ -512,6 +545,13 @@ class ModelManager(private val context: Context) {
         // The facefusion-assets release train, which is where the whole
         // FaceFusion model set lives. Version numbers differ per model and are
         // not interchangeable.
+        // The release tagged `Models` on that repository. The tag matters: the
+        // same file is also published under a second tag, and only this one is
+        // the one the upstream download list points at.
+        private const val GPEN_URL =
+            "https://github.com/harisreedhar/Face-Upscalers-ONNX/releases/download/Models/" +
+                "GPEN-BFR-256.onnx"
+
         private const val XSEG_1_URL =
             "https://github.com/facefusion/facefusion-assets/releases/download/models-3.1.0/xseg_1.onnx"
         private const val XSEG_2_URL =
@@ -558,6 +598,13 @@ class ModelManager(private val context: Context) {
             "https://huggingface.co/facefusion/models-3.0.0/resolve/main/uniface_256.onnx"
 
         private val BUFFALO_ENTRIES = setOf("det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx")
+
+        // The small pack. Two of its files replace the two large ones above at a
+        // thirteenth of the size; 2d106det is shared and already present.
+        private const val BUFFALO_S_ZIP_URL =
+            "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip"
+
+        private val BUFFALO_S_ENTRIES = setOf("det_500m.onnx", "w600k_mbf.onnx")
 
         /** Parse `705 MB` / `1.2 GB` back into bytes; 0 when it cannot. */
         fun parseSize(text: String): Long {
