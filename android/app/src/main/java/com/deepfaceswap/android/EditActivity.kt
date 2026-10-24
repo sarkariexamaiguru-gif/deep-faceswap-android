@@ -92,12 +92,6 @@ class EditActivity : Activity() {
         render()
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == lutRequest && resultCode == RESULT_OK) {
-            data?.data?.let { adoptLut(it) }
-        }
-    }
     private var rotation = 0
     private var flipH = false
 
@@ -124,6 +118,9 @@ class EditActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == pickRequest && resultCode == RESULT_OK) {
             data?.data?.let { load(it) }
+        }
+        if (requestCode == lutRequest && resultCode == RESULT_OK) {
+            data?.data?.let { adoptLut(it) }
         }
     }
 
