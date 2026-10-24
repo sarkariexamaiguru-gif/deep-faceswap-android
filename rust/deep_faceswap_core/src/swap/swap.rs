@@ -132,6 +132,12 @@ pub fn swap_single_pair(
     )
 }
 
+/// How many frames a lost face is carried forward before it is let go.
+///
+/// Long enough to cover a turn, a blink or a hand passing across; short enough
+/// that a cut to a different scene does not keep a face that is no longer there.
+const TRACK_MAX_AGE: u32 = 4;
+
 /// A detected face box, clamped to the image and inset a little so the
 /// compositing pass never works on the very edge of the frame.
 fn face_box(image: &Array3<u8>, bbox: &crate::types::BBox) -> Option<(usize, usize, usize, usize)> {
@@ -1694,6 +1700,14 @@ pub struct SwapSession {
     landmark_detector: Option<LandmarkDetector>,
     source_images: Vec<Array3<u8>>,
     all_source_faces: Vec<SourceFaceInfo>,
+    /// The last frame's detections, and how many frames ago that was.
+    ///
+    /// A detector misses a face on the frame where someone turns, blinks or
+    /// passes a hand across it - and dropping the swap for one frame is what
+    /// flicker looks like. Carrying the last box forward for a few frames is the
+    /// cheap fix, and it is what the reference implementation does.
+    tracked_faces: Vec<DetectedFace>,
+    tracked_age: u32,
 }
 
 impl SwapSession {
@@ -1769,6 +1783,8 @@ impl SwapSession {
             landmark_detector,
             source_images,
             all_source_faces,
+            tracked_faces: Vec::new(),
+            tracked_age: 0,
         })
     }
 
@@ -1813,7 +1829,25 @@ impl SwapSession {
         // can never be shown against this one.
         crate::tools::quality::reset();
 
-        let target_faces = self.detector.detect(array, 0.5, 0.4)?;
+        let detected = self.detector.detect(array, 0.5, 0.4)?;
+
+        // The tracker. If the detector found nothing but it found something very
+        // recently, the face did not vanish - the detector blinked. Reuse the
+        // last boxes for a few frames, then let go, so a scene that genuinely
+        // has no face does not get one painted on.
+        let target_faces = if detected.is_empty() {
+            if !self.tracked_faces.is_empty() && self.tracked_age < TRACK_MAX_AGE {
+                self.tracked_age += 1;
+                self.tracked_faces.clone()
+            } else {
+                Vec::new()
+            }
+        } else {
+            self.tracked_faces = detected.clone();
+            self.tracked_age = 0;
+            detected
+        };
+
         if target_faces.is_empty() {
             // Nothing to swap: the caller writes the array back unchanged.
             return Ok(0);

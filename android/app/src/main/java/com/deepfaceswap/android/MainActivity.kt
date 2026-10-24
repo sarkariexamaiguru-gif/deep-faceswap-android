@@ -1464,6 +1464,82 @@ class MainActivity : Activity() {
         showSheet("Quality report", lines, -1, null) { }
     }
 
+    /**
+     * What is wrong with a source photo, if anything.
+     *
+     * Two things are worth catching before a job starts, because both are cheap
+     * to see and expensive to discover after an encode: a photo too small to
+     * hold a face, and a soft one. The thresholds are rough - they are there to
+     * catch the obvious cases, not to grade a photograph.
+     */
+    private fun sourceAdvice(files: List<File>): String? {
+        val file = files.firstOrNull() ?: return null
+        val bitmap = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+            ?: return null
+
+        val shortest = minOf(bitmap.width, bitmap.height)
+        if (shortest < 256) {
+            return "This source is ${bitmap.width} x ${bitmap.height}. A face needs roughly " +
+                "256 px on the short side before the swapper has anything to work with."
+        }
+
+        val sharpness = laplacianVariance(bitmap)
+        if (sharpness < 40.0) {
+            return "This source looks soft. A sharper photo of the same face swaps better, " +
+                "and the quality report will show it."
+        }
+        return null
+    }
+
+    /**
+     * Laplacian variance over a downscaled copy - the same measure the quality
+     * report uses, so the two numbers mean the same thing.
+     */
+    private fun laplacianVariance(bitmap: Bitmap): Double {
+        val longest = maxOf(bitmap.width, bitmap.height)
+        val small = if (longest > 512) {
+            val scale = 512.0 / longest
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        } else {
+            bitmap
+        }
+        val w = small.width
+        val h = small.height
+        if (w < 3 || h < 3) return 0.0
+
+        val pixels = IntArray(w * h)
+        small.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        var sum = 0.0
+        var sumSquares = 0.0
+        var count = 0
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                var acc = 0.0
+                for (channel in 0..2) {
+                    val shift = channel * 8
+                    fun value(index: Int): Double =
+                        ((pixels[index] shr shift) and 0xFF).toDouble()
+                    acc += value((y - 1) * w + x) + value((y + 1) * w + x) +
+                        value(y * w + (x - 1)) + value(y * w + (x + 1)) -
+                        4.0 * value(y * w + x)
+                }
+                val response = acc / 3.0
+                sum += response
+                sumSquares += response * response
+                count++
+            }
+        }
+        if (count < 2) return 0.0
+        val mean = sum / count
+        return (sumSquares / count) - mean * mean
+    }
+
     /** The HRFFA visibility model if installed, otherwise an empty path. */
     private fun landmarkModelPath(): String =
         models.models()
@@ -3034,11 +3110,18 @@ class MainActivity : Activity() {
             REQ_SOURCE -> {
                 sourceFiles.clear(); sourceFiles.addAll(picked)
                 faces = null; mappings.clear()
+                // Say plainly what is wrong with the input, before a job starts.
+                // A bad source is the most common cause of a bad swap and the app
+                // currently says nothing at all.
+                sourceAdvice(picked)?.let { swapStatus.text = it }
             }
             REQ_TARGET -> {
                 targetFile = picked.first(); faces = null; mappings.clear()
             }
-            REQ_VSOURCE -> { vSources.clear(); vSources.addAll(picked) }
+            REQ_VSOURCE -> {
+                vSources.clear(); vSources.addAll(picked)
+                sourceAdvice(picked)?.let { vidStatus.text = it }
+            }
             REQ_VTARGET -> { vTarget = picked.first() }
         }
         refreshSwap()
