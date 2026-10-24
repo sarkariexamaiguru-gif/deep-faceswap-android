@@ -149,6 +149,12 @@ class ModelManager(private val context: Context) {
             approxSize = "204 MB", licence = "Unknown",
         ),
         Model(
+            "HifiFace converter", HIFIFACE_CONVERTER_FILE, toolsDir, false, Source.URL,
+            url = "https://huggingface.co/facefusion/models-3.1.0/resolve/main/" +
+                HIFIFACE_CONVERTER_FILE,
+            approxSize = "small", licence = "Unknown",
+        ),
+        Model(
             "Upscaler · x4plus", ESRGAN_X4_FILE, toolsDir, false, Source.URL,
             url = ESRGAN_X4_URL, approxSize = "67 MB", licence = "BSD-3-Clause",
         ),
@@ -559,7 +565,8 @@ class ModelManager(private val context: Context) {
         /** The other swapper families, listed so they can be downloaded and tried. */
         const val FACEDANCER_FILE = "FaceDancer_config_c_HQ.onnx"
         const val SIMSWAP_FILE = "simswap_256.onnx"
-        const val SIMSWAP_CONVERTER_FILE = "arcface_simswap.onnx"
+        const val SIMSWAP_CONVERTER_FILE = "arcface_converter_simswap.onnx"
+        const val HIFIFACE_CONVERTER_FILE = "arcface_converter_hififace.onnx"
         const val HIFIFACE_FILE = "hififace_unofficial_256.onnx"
 
         /** A proper quality tier above the 5 MB upscaler. */

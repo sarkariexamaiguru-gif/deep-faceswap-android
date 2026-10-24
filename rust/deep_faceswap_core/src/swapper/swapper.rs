@@ -57,6 +57,10 @@ pub enum SwapperKind {
     Ghost,
     /// UniFace — an aligned source image, 256px.
     Uniface,
+    /// SimSwap — converter-mapped embedding, 256px, standard arcface framing.
+    Simswap,
+    /// HifiFace — converter-mapped embedding, 256px, standard arcface framing.
+    Hififace,
 }
 
 impl SwapperKind {
@@ -69,6 +73,10 @@ impl SwapperKind {
             Self::Ghost
         } else if lower.contains("uniface") {
             Self::Uniface
+        } else if lower.contains("simswap") {
+            Self::Simswap
+        } else if lower.contains("hififace") {
+            Self::Hififace
         } else {
             Self::Inswapper
         }
@@ -85,7 +93,11 @@ impl SwapperKind {
     /// Canonical framing this family was trained on.
     pub fn target_template(self) -> FaceTemplate {
         match self {
-            Self::Inswapper | Self::Hyperswap => FaceTemplate::Arcface128,
+            // The standard arcface framing, which is what the FaceFusion exports
+            // of all three of these were built against.
+            Self::Inswapper | Self::Hyperswap | Self::Simswap | Self::Hififace => {
+                FaceTemplate::Arcface128
+            }
             Self::Ghost => FaceTemplate::Arcface112V1,
             Self::Uniface => FaceTemplate::Ffhq512,
         }
@@ -98,7 +110,11 @@ impl SwapperKind {
 
     /// Whether this family needs a separate embedding converter model.
     pub fn needs_converter(self) -> bool {
-        matches!(self, Self::Ghost)
+        // Each of these supplies identity in an embedding space of its own, so
+        // the ArcFace vector has to be mapped into it first. The sidecar is
+        // found by family name, which is why the file on disk has to be called
+        // `arcface_converter_<family>.onnx` and not something shorter.
+        matches!(self, Self::Ghost | Self::Simswap | Self::Hififace)
     }
 
     /// Short name used to locate a converter sidecar.
@@ -108,6 +124,8 @@ impl SwapperKind {
             Self::Hyperswap => "hyperswap",
             Self::Ghost => "ghost",
             Self::Uniface => "uniface",
+            Self::Simswap => "simswap",
+            Self::Hififace => "hififace",
         }
     }
 }
@@ -159,7 +177,7 @@ impl FaceSwapper {
             let path = Self::converter_path(model_path, kind);
             if !path.exists() {
                 return Err(FaceSwapError::ModelNotFound(format!(
-                    "Ghost swapper needs its embedding converter at {}",
+                    "This swapper needs its embedding converter at {}",
                     path.display()
                 )));
             }

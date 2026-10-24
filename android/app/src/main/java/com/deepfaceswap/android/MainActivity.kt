@@ -2515,6 +2515,12 @@ class MainActivity : Activity() {
             "Permissive licence (Apache-2.0)"),
         Triple(ModelManager.UNIFACE, "UniFace 256",
             "Licence unverified upstream"),
+        // Converter-mapped families: each needs its sidecar beside the swapper,
+        // which is what the download puts there.
+        Triple(ModelManager.SIMSWAP_FILE, "SimSwap 256",
+            "Older, well-tested \u00B7 non-commercial"),
+        Triple(ModelManager.HIFIFACE_FILE, "HifiFace 256",
+            "3DMM-based \u00B7 licence unknown"),
     )
 
     private fun showModelSheet(file: String, label: String) {
