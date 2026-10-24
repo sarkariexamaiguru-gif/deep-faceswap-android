@@ -928,6 +928,26 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setColorMatchN
     COLOR_MATCH.store(enabled != 0, Ordering::Relaxed);
 }
 
+/// Point occlusion masking at an XSeg model. An empty path turns it off.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setOcclusionNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jstring {
+    let text = jstring_to_string(&mut env, &path);
+    deep_faceswap_core::tools::occlusion::set_model_path(&text);
+    let payload = serde_json::json!({
+        "ok": true,
+        "ready": deep_faceswap_core::tools::occlusion::is_ready(),
+    })
+    .to_string();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// Release the swap session and free its models.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionClose(

@@ -73,6 +73,9 @@ pub struct SwapOptions {
     pub enhancer_strength: f32,
     /// Match the swapped face's colour to the target's own skin tone and light.
     pub color_match: bool,
+    /// Leave alone whatever is in front of the face. A swapper is pixel-level
+    /// and would otherwise paint the new face over the microphone.
+    pub occlusion_mask: bool,
 }
 
 impl Default for SwapOptions {
@@ -83,6 +86,7 @@ impl Default for SwapOptions {
             pixel_boost: 1,
             enhancer_strength: 1.0,
             color_match: true,
+            occlusion_mask: false,
         }
     }
 }
@@ -192,6 +196,23 @@ pub fn swap_single_pair_opts(
         None
     };
 
+    // What is in front of the face, worked out BEFORE the swap - afterwards
+    // the pixels we need to put back are gone.
+    // On when the option is set, or when an occluder happens to be loaded - a
+    // 256x256 pass per face is cheap next to the swap itself, and painting over
+    // a hand is the failure people notice first.
+    let want_occlusion =
+        opts.occlusion_mask || crate::tools::occlusion::is_ready();
+    let occlusion_data = if want_occlusion {
+        let prepared = crate::tools::occlusion::prepare(target_image, &target_face.bbox);
+        if prepared.is_some() {
+            log_additional!("occlusion", "Checking what is in front of the face");
+        }
+        prepared
+    } else {
+        None
+    };
+
     log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
     let target_aligned =
         alignment::align_face_with_template(target_image, target_face, swap_size, template)?;
@@ -237,6 +258,13 @@ pub fn swap_single_pair_opts(
     if let Some(ref data) = mouth_mask_data {
         log_additional!("mouth_mask", "Applying mouth mask");
         mouth_mask::apply_mouth_mask(target_image, data);
+    }
+
+    // And put back whatever is covering the face, for the same reason the mouth
+    // mask exists: the swap does not know it is there.
+    if let Some(ref data) = occlusion_data {
+        log_additional!("occlusion", "Leaving the pixels in front of the face alone");
+        crate::tools::occlusion::restore(target_image, data);
     }
 
     // Enhance face if enhancer is provided

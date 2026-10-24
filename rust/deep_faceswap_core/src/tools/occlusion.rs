@@ -16,7 +16,9 @@
 
 use crate::config;
 use crate::types::{FaceSwapError, Result};
-use ndarray::{Array3, Array4};
+use crate::types::BBox;
+use ndarray::{s, Array3, Array4};
+use std::sync::Mutex;
 use ort::{
     inputs,
     session::{builder::GraphOptimizationLevel, Session},
@@ -162,4 +164,134 @@ fn resize_mask(mask: &Array3<u8>, new_w: usize, new_h: usize) -> Array3<u8> {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------- the slot --
+
+/// One XSeg, loaded once and shared.
+///
+/// A process-wide slot rather than a parameter, for the same reason
+/// `config::intra_threads` is one: threading an occluder through every swap
+/// signature and its three call layers buys nothing, and the model is identical
+/// for every caller. The Mutex is not decoration - clone workers run in
+/// parallel, so two frames can arrive at once.
+static OCCLUDER: Mutex<Option<Occluder>> = Mutex::new(None);
+
+struct Occluder {
+    path: String,
+    session: Session,
+}
+
+/// Point occlusion at a model. An empty path turns it off.
+///
+/// A model that will not load turns it off too, rather than failing every frame
+/// from then on - occlusion is an improvement, not a prerequisite.
+pub fn set_model_path(path: &str) {
+    let mut slot = match OCCLUDER.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if path.is_empty() {
+        *slot = None;
+        return;
+    }
+    if slot.as_ref().map(|o| o.path == path).unwrap_or(false) {
+        return;
+    }
+    *slot = match load(path) {
+        Ok(session) => Some(Occluder {
+            path: path.to_string(),
+            session,
+        }),
+        Err(_) => None,
+    };
+}
+
+/// Whether an occluder is loaded and ready.
+pub fn is_ready() -> bool {
+    let slot = match OCCLUDER.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    slot.is_some()
+}
+
+/// How far past the detected box to look, so an object at the face's edge is
+/// still caught. The reference default.
+const PADDING: f32 = 0.15;
+
+/// The pixels we must not overwrite, and where they are.
+pub struct OcclusionData {
+    x: usize,
+    y: usize,
+    original: Array3<u8>,
+    mask: Array3<u8>,
+}
+
+/// Work out what is in front of the face, and keep the original pixels.
+///
+/// Must run BEFORE the swap, because afterwards the pixels are gone.
+pub fn prepare(image: &Array3<u8>, bbox: &BBox) -> Option<OcclusionData> {
+    let mut slot = match OCCLUDER.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let occluder = slot.as_mut()?;
+
+    let (h, w, _) = image.dim();
+    let pad_x = (bbox.x2 - bbox.x1) * PADDING;
+    let pad_y = (bbox.y2 - bbox.y1) * PADDING;
+
+    let x0 = (bbox.x1 - pad_x).floor().max(0.0) as usize;
+    let y0 = (bbox.y1 - pad_y).floor().max(0.0) as usize;
+    let x1 = ((bbox.x2 + pad_x).ceil() as usize).min(w);
+    let y1 = ((bbox.y2 + pad_y).ceil() as usize).min(h);
+    if x1 <= x0 || y1 <= y0 || x1 > w || y1 > h {
+        return None;
+    }
+
+    let original = image.slice(s![y0..y1, x0..x1, ..]).to_owned();
+    let mask = mask_for(&mut occluder.session, &original).ok()?;
+    Some(OcclusionData {
+        x: x0,
+        y: y0,
+        original,
+        mask,
+    })
+}
+
+/// Put the original pixels back wherever something is covering the face.
+///
+/// This is the whole point. A swapper is pixel-level and would otherwise paint
+/// the new face straight over the microphone.
+pub fn restore(image: &mut Array3<u8>, data: &OcclusionData) {
+    let (mh, mw, _) = data.mask.dim();
+    let (ih, iw, _) = image.dim();
+
+    for y in 0..mh {
+        let ty = data.y + y;
+        if ty >= ih {
+            break;
+        }
+        for x in 0..mw {
+            let tx = data.x + x;
+            if tx >= iw {
+                break;
+            }
+            let skin = data.mask[[y, x, 0]] as f32 / 255.0;
+            // High means skin, so invert. The knee at 0.5 with a short ramp
+            // gives a near-binary decision with a soft join, which is what
+            // stops the restored object showing a hard outline.
+            let keep = ((0.5 - skin) * 4.0).clamp(0.0, 1.0);
+            if keep <= 0.01 {
+                continue;
+            }
+            for c in 0..3 {
+                let now = image[[ty, tx, c]] as f32;
+                let before = data.original[[y, x, c]] as f32;
+                image[[ty, tx, c]] =
+                    (now * (1.0 - keep) + before * keep).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
 }

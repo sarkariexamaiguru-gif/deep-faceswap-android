@@ -313,6 +313,8 @@ object NativeBridge {
 
     private external fun setColorMatchNative(enabled: Boolean)
 
+    private external fun setOcclusionNative(path: String): String
+
     private external fun sessionSwapFrameRawWorker(
         worker: Int,
         width: Int,
@@ -499,6 +501,14 @@ object NativeBridge {
     fun setColorMatch(enabled: Boolean) {
         runCatching { setColorMatchNative(enabled) }
     }
+
+    /**
+     * Point occlusion masking at an XSeg model, or pass an empty path to turn it
+     * off. Returns whether a model is loaded and ready.
+     */
+    fun setOcclusion(path: String): Boolean = runCatching {
+        setOcclusionNative(path).contains("\"ready\":true")
+    }.getOrDefault(false)
 
     /** Release the session and free its models. Safe to call when none is open. */
     fun closeSession() {
