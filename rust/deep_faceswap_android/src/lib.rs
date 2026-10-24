@@ -67,6 +67,24 @@ fn with_session<T>(
 static COLOR_MATCH: AtomicBool = AtomicBool::new(true);
 
 /// Copy a Java string into a Rust `String` (empty string on failure).
+/// The message out of a panic, which `catch_unwind` hands back as an opaque
+/// payload.
+///
+/// Discarding it - which this file used to do - turns every panic in a new code
+/// path into the same sentence, and a sentence that names no cause is not a
+/// diagnostic. A panic in the occlusion stage, the compositing pass or the
+/// quality report would all have read as "native panic during face swap".
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "a panic with no message".to_string()
+    }
+}
+
+
 fn jstring_to_string(env: &mut JNIEnv, s: &JString) -> String {
     env.get_string(s)
         .map(|js| js.into())
@@ -174,10 +192,10 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
             STAGE.store(-1, Ordering::SeqCst);
             serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()
         }
-        Err(_) => {
+        Err(payload) => {
             STAGE.store(-1, Ordering::SeqCst);
-            serde_json::json!({ "ok": false, "error": "native panic during face swap" })
-                .to_string()
+            serde_json::json!({ "ok": false, "error": format!("native panic during face swap: {}", panic_message(&payload)) })
+            .to_string()
         }
     };
 
@@ -352,10 +370,10 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImageMappe
             STAGE.store(-1, Ordering::SeqCst);
             serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()
         }
-        Err(_) => {
+        Err(payload) => {
             STAGE.store(-1, Ordering::SeqCst);
-            serde_json::json!({ "ok": false, "error": "native panic during face swap" })
-                .to_string()
+            serde_json::json!({ "ok": false, "error": format!("native panic during face swap: {}", panic_message(&payload)) })
+            .to_string()
         }
     };
 
@@ -449,10 +467,10 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapAnimation(
             STAGE.store(-1, Ordering::SeqCst);
             serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()
         }
-        Err(_) => {
+        Err(payload) => {
             STAGE.store(-1, Ordering::SeqCst);
-            serde_json::json!({ "ok": false, "error": "native panic during animation swap" })
-                .to_string()
+            serde_json::json!({ "ok": false, "error": format!("native panic during animation swap: {}", panic_message(&payload)) })
+            .to_string()
         }
     };
 
@@ -1141,7 +1159,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionClose(
             guard.clear();
             serde_json::json!({ "ok": true }).to_string()
         }
-        Err(_) => serde_json::json!({ "ok": false, "error": "session lock poisoned" }).to_string(),
+        Err(payload) => serde_json::json!({ "ok": false, "error": format!("session lock poisoned: {}", panic_message(&payload)) }).to_string(),
     };
     to_jstring(&mut env, payload)
 }
