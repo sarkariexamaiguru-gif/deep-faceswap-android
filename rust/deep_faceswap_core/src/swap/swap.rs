@@ -196,6 +196,11 @@ pub fn swap_single_pair_opts(
         None
     };
 
+    // Quality: the sharpness of the face region before anything changes, so the
+    // after number has something to compare against. Taken here because this is
+    // the last moment the original pixels exist.
+    let sharpness_before = crate::tools::quality::face_sharpness(target_image, &target_face.bbox);
+
     // What is in front of the face, worked out BEFORE the swap - afterwards
     // the pixels we need to put back are gone.
     // On when the option is set, or when an occluder happens to be loaded - a
@@ -266,6 +271,12 @@ pub fn swap_single_pair_opts(
         log_additional!("occlusion", "Leaving the pixels in front of the face alone");
         crate::tools::occlusion::restore(target_image, data);
     }
+
+    // Quality: did the face get softer or crisper? Same box, after every pass.
+    crate::tools::quality::record_sharpness(
+        sharpness_before,
+        crate::tools::quality::face_sharpness(target_image, &target_face.bbox),
+    );
 
     // Enhance face if enhancer is provided
     if let Some(ref mut enh) = enhancer {
@@ -1752,6 +1763,10 @@ impl SwapSession {
         mappings: &[(usize, usize)],
     ) -> Result<usize> {
 
+        // A fresh report per frame, so a stale number from the previous frame
+        // can never be shown against this one.
+        crate::tools::quality::reset();
+
         let target_faces = self.detector.detect(array, 0.5, 0.4)?;
         if target_faces.is_empty() {
             // Nothing to swap: the caller writes the array back unchanged.
@@ -1814,6 +1829,33 @@ impl SwapSession {
             &mut |_, _, _| {},
         )?;
 
+        // Quality: does the result actually look like the person? Cosine between
+        // the source face's embedding and the swapped face's own, both taken now
+        // through the same recogniser so the comparison is like for like.
+        if let Some(pair) = pairs.first() {
+            if let (Some(target), Some(info)) = (
+                target_faces.get(pair.target_idx),
+                all_source_faces.get(pair.source_idx),
+            ) {
+                if let Some(source_image) = source_images.get(info.source_image_index) {
+                    let source_aligned =
+                        crate::alignment::align_face(source_image, &info.face, 112);
+                    let target_aligned = crate::alignment::align_face(array, target, 112);
+                    if let (Ok(from), Ok(to)) = (source_aligned, target_aligned) {
+                        if let (Ok(a), Ok(b)) = (
+                            recognizer.extract_embedding(&from.aligned_image),
+                            recognizer.extract_embedding(&to.aligned_image),
+                        ) {
+                            crate::tools::quality::record_id(
+                                crate::tools::quality::cosine(&a, &b),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        crate::tools::quality::record_faces(swapped);
         Ok(swapped)
     }
 

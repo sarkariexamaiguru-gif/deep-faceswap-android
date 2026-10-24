@@ -315,6 +315,8 @@ object NativeBridge {
 
     private external fun setOcclusionNative(path: String): String
 
+    private external fun qualityReportNative(): String
+
     private external fun sessionSwapFrameRawWorker(
         worker: Int,
         width: Int,
@@ -509,6 +511,14 @@ object NativeBridge {
     fun setOcclusion(path: String): Boolean = runCatching {
         setOcclusionNative(path).contains("\"ready\":true")
     }.getOrDefault(false)
+
+    /**
+     * The quality report for the most recent frame, as JSON.
+     *
+     * ID similarity, sharpness before and after, and how much of the face an
+     * occluder protected. An empty object when nothing has run.
+     */
+    fun qualityReport(): String = runCatching { qualityReportNative() }.getOrDefault("{}")
 
     /** Release the session and free its models. Safe to call when none is open. */
     fun closeSession() {

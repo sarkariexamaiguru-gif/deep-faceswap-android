@@ -268,6 +268,11 @@ pub fn restore(image: &mut Array3<u8>, data: &OcclusionData) {
     let (mh, mw, _) = data.mask.dim();
     let (ih, iw, _) = image.dim();
 
+    // Quality: how much of this face was behind something. Counted over the
+    // whole crop, so it is a fraction of the face box rather than of the skin.
+    let mut protected = 0usize;
+    let mut considered = 0usize;
+
     for y in 0..mh {
         let ty = data.y + y;
         if ty >= ih {
@@ -283,6 +288,10 @@ pub fn restore(image: &mut Array3<u8>, data: &OcclusionData) {
             // gives a near-binary decision with a soft join, which is what
             // stops the restored object showing a hard outline.
             let keep = ((0.5 - skin) * 4.0).clamp(0.0, 1.0);
+            considered += 1;
+            if keep > 0.5 {
+                protected += 1;
+            }
             if keep <= 0.01 {
                 continue;
             }
@@ -293,5 +302,9 @@ pub fn restore(image: &mut Array3<u8>, data: &OcclusionData) {
                     (now * (1.0 - keep) + before * keep).clamp(0.0, 255.0) as u8;
             }
         }
+    }
+
+    if considered > 0 {
+        crate::tools::quality::record_occlusion(protected as f64 / considered as f64);
     }
 }

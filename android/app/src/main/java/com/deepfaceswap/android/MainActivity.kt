@@ -388,11 +388,11 @@ class MainActivity : Activity() {
     private fun renderNav() {
         navRow.removeAllViews()
         listOf(
+            // Four places, not seven. Swap and Video left the bar because they
+            // are tools, and tools live on Home. Tools merged into Models - two
+            // tabs were doing one job: managing what the app can run.
             "home" to ("Home" to R.drawable.ic_sparkle),
-            "swap" to ("Swap" to R.drawable.ic_swap),
-            "video" to ("Video" to R.drawable.ic_video),
-            "history" to ("History" to R.drawable.ic_history),
-            "tools" to ("Tools" to R.drawable.ic_tools),
+            "history" to ("Library" to R.drawable.ic_history),
             "models" to ("Models" to R.drawable.ic_cube),
             "settings" to ("Settings" to R.drawable.ic_settings),
         ).forEach { (key, spec) ->
@@ -405,9 +405,9 @@ class MainActivity : Activity() {
                 layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 isClickable = true
                 contentDescription = label
-                addView(RoopUi.iconView(this@MainActivity, icon, 24,
+                addView(RoopUi.iconView(this@MainActivity, icon, 26,
                     if (active) R.color.blue else R.color.ink_secondary))
-                addView(RoopUi.text(this@MainActivity, label, 11f,
+                addView(RoopUi.text(this@MainActivity, label, 11.5f,
                     if (active) R.color.blue else R.color.ink_secondary, if (active) 1 else 0)
                     .apply { layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 0, 3, 0, 0) })
@@ -1388,6 +1388,64 @@ class MainActivity : Activity() {
         return card
     }
 
+    /**
+     * The quality report for the job that just finished.
+     *
+     * Three numbers, and they are the point: every quality claim this app makes
+     * can now be checked rather than assumed. Shown as a sheet rather than
+     * buried, because a number nobody sees cannot guide anything.
+     */
+    private fun showQualityReport() {
+        val raw = NativeBridge.qualityReport()
+        val parsed = runCatching { org.json.JSONObject(raw) }.getOrNull() ?: return
+
+        fun num(key: String): Double? =
+            if (parsed.isNull(key)) null else parsed.optDouble(key).takeIf { !it.isNaN() }
+
+        val faces = parsed.optInt("facesSwapped", 0)
+        if (faces == 0) return
+
+        val lines = mutableListOf<String>()
+
+        num("idSimilarity")?.let { value ->
+            // Cosine between the source face and the result. Above about 0.5
+            // reads as the same person to ArcFace; below it, it does not.
+            val verdict = when {
+                value >= 0.6 -> "clearly the same person"
+                value >= 0.45 -> "recognisably the same person"
+                value >= 0.3 -> "loosely similar"
+                else -> "not reading as the same person"
+            }
+            lines.add("Identity  ${"%.2f".format(value)}  -  $verdict")
+        }
+
+        val before = num("sharpnessBefore")
+        val after = num("sharpnessAfter")
+        if (before != null && after != null && before > 1.0) {
+            val change = (after / before - 1.0) * 100.0
+            val verdict = when {
+                change > 12 -> "crisper than the original"
+                change > -12 -> "about as sharp as the original"
+                else -> "softer than the original"
+            }
+            lines.add("Sharpness  ${"%.0f".format(change)}%  -  $verdict")
+        }
+
+        num("occlusionCoverage")?.let { value ->
+            if (value > 0.005) {
+                lines.add(
+                    "Occlusion  ${"%.0f".format(value * 100)}% of the face box  -  " +
+                        "left alone because something was in front",
+                )
+            } else {
+                lines.add("Occlusion  nothing in front of the face")
+            }
+        }
+
+        if (lines.isEmpty()) return
+        showSheet("Quality report", lines, -1, null) { }
+    }
+
     /** The XSeg model if it has been installed, otherwise an empty path. */
     private fun occlusionModelPath(): String =
         models.models()
@@ -1410,7 +1468,7 @@ class MainActivity : Activity() {
 
     private fun buildHistoryScreen(): View {
         val col = pageColumn()
-        col.addView(RoopUi.screenTitle(this, "History"))
+        col.addView(RoopUi.screenTitle(this, "Library"))
         col.addView(RoopUi.body(
             this, "All your face swap results, privately saved on this device.",
         ).apply {
@@ -2633,6 +2691,7 @@ class MainActivity : Activity() {
                 showResultCardFor(out, host)
                 if (host == "video") vidStatus.text = "Completed" else swapStatus.text = "Completed"
                 toast("Done")
+                showQualityReport()
             }
             SwapBus.Stage.FAILED -> {
                 stopPolling()
@@ -3006,7 +3065,11 @@ class MainActivity : Activity() {
     // -------------------------------------------------------------- misc
 
     private fun showOverflow() {
-        showSheet("More options", listOf("Reset inputs", "Settings", "Help & Guide"), -1, null) { pick ->
+        showSheet(
+            "More options",
+            listOf("Reset inputs", "Tools and diagnostics", "Settings", "Help & Guide"),
+            -1, null,
+        ) { pick ->
             when (pick) {
                 0 -> {
                     sourceFiles.clear(); targetFile = null; faces = null; mappings.clear()
@@ -3014,7 +3077,8 @@ class MainActivity : Activity() {
                     refreshSwap(); refreshVideo()
                     toast("Selections reset")
                 }
-                1 -> show("settings")
+                1 -> show("tools")
+                2 -> show("settings")
                 else -> showHelp()
             }
         }

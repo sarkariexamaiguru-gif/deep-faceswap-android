@@ -139,8 +139,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
         pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
         color_match: COLOR_MATCH.load(Ordering::Relaxed),
-            ..SwapOptions::default()
-        };
+    };
 
     // Reset progress so a stale value from a previous run can never be shown.
     STAGE.store(SwapStage::LoadingModels as i32, Ordering::SeqCst);
@@ -317,8 +316,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImageMappe
         pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
         color_match: COLOR_MATCH.load(Ordering::Relaxed),
-            ..SwapOptions::default()
-        };
+    };
 
     STAGE.store(SwapStage::LoadingModels as i32, Ordering::SeqCst);
     FACES_DONE.store(0, Ordering::SeqCst);
@@ -414,8 +412,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapAnimation(
         pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
         color_match: COLOR_MATCH.load(Ordering::Relaxed),
-            ..SwapOptions::default()
-        };
+    };
 
     STAGE.store(SwapStage::LoadingModels as i32, Ordering::SeqCst);
     FACES_DONE.store(0, Ordering::SeqCst);
@@ -578,8 +575,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
         pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
         color_match: COLOR_MATCH.load(Ordering::Relaxed),
-            ..SwapOptions::default()
-        };
+    };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         with_session(0, |session| {
@@ -636,8 +632,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
         pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
         color_match: COLOR_MATCH.load(Ordering::Relaxed),
-            ..SwapOptions::default()
-        };
+    };
 
     let input = match env.convert_byte_array(&frame) {
         Ok(bytes) => bytes,
@@ -702,8 +697,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionSwapFra
         pixel_boost: pixel_boost.clamp(1, MAX_PIXEL_BOOST as i32) as u32,
         enhancer_strength: enhancer_strength.clamp(0.0, 1.0),
         color_match: COLOR_MATCH.load(Ordering::Relaxed),
-            ..SwapOptions::default()
-        };
+    };
 
     let input = match env.convert_byte_array(&frame) {
         Ok(bytes) => bytes,
@@ -934,20 +928,13 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setColorMatchN
     COLOR_MATCH.store(enabled != 0, Ordering::Relaxed);
 }
 
-/// Point occlusion masking at an XSeg model. An empty path turns it off.
+/// The quality report for the most recent frame, as JSON.
 #[no_mangle]
-pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setOcclusionNative(
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(
     mut env: JNIEnv,
     _class: JClass,
-    path: JString,
 ) -> jstring {
-    let text = jstring_to_string(&mut env, &path);
-    deep_faceswap_core::tools::occlusion::set_model_path(&text);
-    let payload = serde_json::json!({
-        "ok": true,
-        "ready": deep_faceswap_core::tools::occlusion::is_ready(),
-    })
-    .to_string();
+    let payload = deep_faceswap_core::tools::quality::report_json();
     match env.new_string(payload) {
         Ok(value) => value.into_raw(),
         Err(_) => std::ptr::null_mut(),
