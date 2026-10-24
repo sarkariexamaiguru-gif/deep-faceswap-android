@@ -70,6 +70,7 @@ class ToolActivity : Activity() {
     private lateinit var previewView: ImageView
     private lateinit var statusView: TextView
     private lateinit var runButton: Button
+    private lateinit var tierRow: LinearLayout
 
     private val pickRequest = 7303
 
@@ -79,6 +80,9 @@ class ToolActivity : Activity() {
         title = intent.getStringExtra(EXTRA_TITLE) ?: "Tool"
         blurb = intent.getStringExtra(EXTRA_BLURB) ?: ""
         modelFile = intent.getStringExtra(EXTRA_MODEL) ?: ""
+        // If the tool offers tiers, start on the first - the small model that
+        // was already the default before tiers existed.
+        ToolTiers.forTool(toolId).firstOrNull()?.let { modelFile = it.file }
         scale = intent.getIntExtra(EXTRA_SCALE, 1).coerceAtLeast(1)
 
         val root = LinearLayout(this).apply {
@@ -112,6 +116,19 @@ class ToolActivity : Activity() {
         }
         root.addView(statusView)
 
+        // Quality tiers. A tool is one job and a model is one way to do it, so
+        // the choice belongs here rather than buried on the Models screen.
+        tierRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(
+            android.widget.HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(tierRow)
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) },
+        )
+
         previewView = ImageView(this).apply {
             adjustViewBounds = true
             setBackgroundColor(Color.WHITE)
@@ -136,6 +153,45 @@ class ToolActivity : Activity() {
         )
 
         setContentView(root)
+        buildTiers()
+    }
+
+    /**
+     * The tier chips, rebuilt whenever the choice changes.
+     *
+     * Changing tier re-runs the last image so the difference is visible rather
+     * than remembered - which is the whole reason to offer the choice here.
+     */
+    private fun buildTiers() {
+        val tiers = ToolTiers.forTool(toolId)
+        tierRow.visibility = if (tiers.size < 2) android.view.View.GONE else android.view.View.VISIBLE
+        if (tiers.size < 2) return
+
+        tierRow.removeAllViews()
+        tiers.forEach { tier ->
+            val on = tier.file == modelFile
+            tierRow.addView(TextView(this).apply {
+                text = tier.label
+                textSize = 12f
+                isAllCaps = false
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                setTextColor(if (on) Color.WHITE else Color.parseColor("#4E5C7C"))
+                setBackgroundColor(
+                    if (on) Color.parseColor("#1677FF") else Color.parseColor("#FFFFFF"),
+                )
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dp(8) }
+                setOnClickListener {
+                    if (modelFile == tier.file) return@setOnClickListener
+                    modelFile = tier.file
+                    statusView.text = tier.note
+                    buildTiers()
+                    // Re-run if there is something to run on.
+                    if (source != null && !busy) run()
+                }
+            })
+        }
     }
 
     private fun choosePhoto() {

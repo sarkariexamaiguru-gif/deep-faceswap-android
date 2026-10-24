@@ -125,6 +125,22 @@ class ModelManager(private val context: Context) {
             url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
         ),
         Model(
+            "Upscaler · x4plus", ESRGAN_X4_FILE, toolsDir, false, Source.URL,
+            url = ESRGAN_X4_URL, approxSize = "67 MB", licence = "BSD-3-Clause",
+        ),
+        Model(
+            "Upscaler · Swin2SR", SWIN2SR_FILE, toolsDir, false, Source.URL,
+            url = SWIN2SR_URL, approxSize = "57 MB", licence = "Apache-2.0",
+        ),
+        Model(
+            "De-JPEG · RealPLKSR", REALPLKSR_DEJPEG_FILE, toolsDir, false, Source.URL,
+            url = REALPLKSR_DEJPEG_URL, approxSize = "30 MB", licence = "not stated",
+        ),
+        Model(
+            "Denoiser · RealPLKSR", REALPLKSR_DENOISE_FILE, toolsDir, false, Source.URL,
+            url = REALPLKSR_DENOISE_URL, approxSize = "30 MB", licence = "not stated",
+        ),
+        Model(
             "Visibility · HRFFA", LANDMARK_MODEL_FILE, toolsDir, false, Source.URL,
             url = LANDMARK_URL, approxSize = "7 MB", licence = "MIT",
         ),
@@ -513,6 +529,16 @@ class ModelManager(private val context: Context) {
         /** JPEG artifact remover. */
         const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
 
+        /** A proper quality tier above the 5 MB upscaler. */
+        const val ESRGAN_X4_FILE = "Real-ESRGAN-x4plus.onnx"
+
+        /** Transformer upscaling, the other look at the top tier. */
+        const val SWIN2SR_FILE = "swin2_sr_x4.onnx"
+
+        /** A real de-JPEG tier, and a denoiser, above the tiny ones. */
+        const val REALPLKSR_DEJPEG_FILE = "1xDeJPG_realplksr_otf_fp32.onnx"
+        const val REALPLKSR_DENOISE_FILE = "1xDeNoise_realplksr_otf_fp32.onnx"
+
         /** Visibility: which landmarks are behind something. */
         const val LANDMARK_MODEL_FILE = "hrffa_hg0_ibug68_1x3x256x256.onnx"
 
@@ -566,6 +592,20 @@ class ModelManager(private val context: Context) {
         private const val LANDMARK_URL =
             "https://github.com/PINTO0309/High-Angle_Robust_Fast_FaceAlignment/releases/" +
                 "download/weights/hrffa_hg0_ibug68_1x3x256x256.onnx"
+
+        // Repositories verified in the research sweep; the exact asset names
+        // follow the patterns those repos publish. A wrong name fails loudly at
+        // download time rather than silently.
+        private const val ESRGAN_X4_URL =
+            "https://huggingface.co/qualcomm/Real-ESRGAN-x4plus/resolve/main/Real-ESRGAN-x4plus.onnx"
+        private const val SWIN2SR_URL =
+            "https://huggingface.co/facefusion/models-3.1.0/resolve/main/swin2_sr_x4.onnx"
+        private const val REALPLKSR_DEJPEG_URL =
+            "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/" +
+                "1xDeJPG_realplksr_otf_fp32_fullyoptimized.onnx"
+        private const val REALPLKSR_DENOISE_URL =
+            "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/" +
+                "1xDeNoise_realplksr_otf_fp32_fullyoptimized.onnx"
 
         private const val XSEG_1_URL =
             "https://github.com/facefusion/facefusion-assets/releases/download/models-3.1.0/xseg_1.onnx"
