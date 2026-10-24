@@ -862,6 +862,20 @@ class MainActivity : Activity() {
         vidTiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         col.addView(RoopUi.hScroll(this, vidTiles))
 
+        // Preview before committing. A wrong setting currently costs a whole
+        // encode to discover; this makes finding out cost a few seconds.
+        val previewCta = android.widget.Button(this).apply {
+            text = "Preview 3 frames first"
+            textSize = 13f
+            isAllCaps = false
+            setOnClickListener { openPreview() }
+        }
+        col.addView(
+            previewCta,
+            RoopUi.margin(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 8),
+        )
+
         vidCta = RoopUi.primaryButton(this, "Generate Video", R.drawable.ic_play)
         vidCta.setOnClickListener { runVideo() }
         col.addView(vidCta)
@@ -2620,6 +2634,33 @@ class MainActivity : Activity() {
         SwapService.start(this)
     }
 
+    /**
+     * Sample a few frames and swap them, so the settings can be judged before a
+     * whole clip is encoded. Same pipeline on a shorter input - and the
+     * per-frame timing it produces is a real estimate for the full job.
+     */
+    private fun openPreview() {
+        val target = vTarget ?: run {
+            toast("Choose a video first")
+            return
+        }
+        if (vSources.isEmpty()) {
+            toast("Add at least one face first")
+            return
+        }
+        startActivityForResult(
+            PreviewActivity.intent(
+                this,
+                target.absolutePath,
+                vSources.map { it.absolutePath },
+                swapperFile,
+                if (qualityIndex == 3) 4 else qualityGrid(),
+                if (restoreOn) prefs.restoreStrength else 1f,
+            ),
+            REQ_PREVIEW,
+        )
+    }
+
     private fun runVideo() {
         val target = vTarget ?: return
         if (qualityIndex == 3) qualityIndex = 2
@@ -2942,6 +2983,11 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_PREVIEW) {
+            // Approved: run the whole clip with the settings that were previewed.
+            if (resultCode == RESULT_OK) runVideo()
+            return
+        }
         if (requestCode in listOf(REQ_CAM_SOURCE, REQ_CAM_VSOURCE, REQ_CAM_TARGET)) {
             val file = captureTarget
             captureTarget = null
@@ -3266,6 +3312,7 @@ class MainActivity : Activity() {
         const val REQ_CAM_TARGET = 18
         const val REQ_PERMISSION = 17
         const val REQ_NOTIFICATIONS = 19
+        const val REQ_PREVIEW = 20
 
         val ENCODABLE_OUTPUT = setOf("jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp", "gif")
         val VIDEO_EXTENSIONS = setOf(

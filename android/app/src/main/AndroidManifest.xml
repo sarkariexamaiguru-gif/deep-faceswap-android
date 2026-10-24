@@ -41,6 +41,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Preview: swap a few sampled frames before committing to a clip. -->
+        <activity
+            android:name=".PreviewActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/Theme.Roop" />
+
         <!-- One screen for every tool: pick, fetch the model, run, save. -->
         <activity
             android:name=".ToolActivity"
