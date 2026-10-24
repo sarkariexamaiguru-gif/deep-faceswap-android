@@ -27,6 +27,7 @@ pub fn check(path: &str) -> std::result::Result<String, String> {
         Ok(meta) => meta.len(),
         Err(e) => return Err(format!("could not read it: {e}")),
     };
+    let megabytes = bytes as f64 / 1_048_576.0;
     if bytes < 1024 {
         return Err(format!(
             "only {} bytes - a download that did not finish",
@@ -46,10 +47,14 @@ pub fn check(path: &str) -> std::result::Result<String, String> {
             // the part that names the actual problem.
             let text = format!("{e}");
             let first = text.lines().next().unwrap_or("").trim().to_string();
+            // The size goes in the failure too. A model that should be 13 MB
+            // and is 2 MB has a diagnosis, and without the number that is
+            // invisible - which is exactly how this one hid.
+            let size = format!("{:.1} MB", megabytes);
             if first.is_empty() {
-                "it will not load as an ONNX model".to_string()
+                format!("it will not load as an ONNX model (the file is {size})")
             } else {
-                format!("it will not load: {first}")
+                format!("it will not load: {first} (the file is {size})")
             }
         })?;
 

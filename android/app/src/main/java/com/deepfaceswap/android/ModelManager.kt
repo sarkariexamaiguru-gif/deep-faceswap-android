@@ -235,10 +235,31 @@ class ModelManager(private val context: Context) {
     private fun preferred(small: String, large: String, floorBytes: Long): String {
         val smallFile = File(buffaloDir, small)
         val largeFile = File(buffaloDir, large)
-        return if (smallFile.isFile && smallFile.length() >= floorBytes) {
+        return if (smallUsable(smallFile, floorBytes)) {
             smallFile.absolutePath
         } else {
             largeFile.absolutePath
+        }
+    }
+
+    /** Answers are remembered: the check costs a model load, once. */
+    private val usableCache = HashMap<String, Boolean>()
+
+    /**
+     * Present, plausibly sized, AND loadable.
+     *
+     * Size alone is not enough, and this is the lesson. A truncated 13 MB file
+     * can still be 6 MB, pass any loose floor, and then fail at load - which is
+     * exactly how a broken recogniser came to be preferred over a working one,
+     * making every swap fail with no clue why.
+     *
+     * Loading is the only honest test, so it happens once per file and the
+     * answer is cached. A 13 MB load is about a second, paid a single time.
+     */
+    private fun smallUsable(file: File, floorBytes: Long): Boolean {
+        if (!file.isFile || file.length() < floorBytes) return false
+        return usableCache.getOrPut(file.absolutePath) {
+            NativeBridge.checkModel(file.absolutePath).first
         }
     }
     val landmarkPath get() = File(buffaloDir, "2d106det.onnx").absolutePath
@@ -510,6 +531,11 @@ class ModelManager(private val context: Context) {
             destDir.mkdirs()
             var done = 0L
             var sinceReport = 0L
+            // Which entries actually arrived. A zip stream that ends early - a
+            // dropped connection - simply stops, leaving a partial file and no
+            // exception, so the download would report success over a file that
+            // cannot be opened.
+            val written = mutableSetOf<String>()
             progress(Progress(label, 0L, expectedTotal))
             ZipInputStream(conn.inputStream.buffered()).use { zip ->
                 var entry = zip.nextEntry
@@ -530,10 +556,20 @@ class ModelManager(private val context: Context) {
                                 }
                             }
                         }
+                        written.add(name)
                     }
                     zip.closeEntry()
                     entry = zip.nextEntry
                 }
+            }
+            val missing = wanted - written
+            if (missing.isNotEmpty()) {
+                // Leave nothing behind that looks like a usable model.
+                missing.forEach { runCatching { File(destDir, it).delete() } }
+                throw IllegalStateException(
+                    "The download stopped early \u2014 " + missing.joinToString(", ") +
+                        " did not arrive. Nothing was kept; try again.",
+                )
             }
             progress(Progress(label, done, expectedTotal, finished = true))
         } finally {
