@@ -2542,6 +2542,8 @@ class MainActivity : Activity() {
             "Older, well-tested \u00B7 non-commercial"),
         Triple(ModelManager.HIFIFACE_FILE, "HifiFace 256",
             "3DMM-based \u00B7 licence unknown"),
+        Triple(ModelManager.FACEDANCER_FILE, "FaceDancer 256",
+            "Occlusion-aware by design \u00b7 non-commercial"),
     )
 
     private fun showModelSheet(file: String, label: String) {

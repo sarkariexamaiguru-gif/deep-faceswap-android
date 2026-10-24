@@ -61,6 +61,16 @@ pub enum SwapperKind {
     Simswap,
     /// HifiFace — converter-mapped embedding, 256px, standard arcface framing.
     Hififace,
+    /// FaceDancer — an aligned source frame, 256px.
+    ///
+    /// The framing here is the one ASSUMPTION in this list. FaceDancer comes from
+    /// a mirror that does not follow the FaceFusion export convention, so unlike
+    /// the others its canonical crop was not stated anywhere this app could
+    /// read. The standard arcface framing is the best-supported guess, and the
+    /// quality report is what settles it: a wrong template shows up as identity
+    /// similarity dropping, which is exactly the kind of failure that used to be
+    /// invisible.
+    Facedancer,
 }
 
 impl SwapperKind {
@@ -77,6 +87,8 @@ impl SwapperKind {
             Self::Simswap
         } else if lower.contains("hififace") {
             Self::Hififace
+        } else if lower.contains("facedancer") {
+            Self::Facedancer
         } else {
             Self::Inswapper
         }
@@ -95,9 +107,11 @@ impl SwapperKind {
         match self {
             // The standard arcface framing, which is what the FaceFusion exports
             // of all three of these were built against.
-            Self::Inswapper | Self::Hyperswap | Self::Simswap | Self::Hififace => {
-                FaceTemplate::Arcface128
-            }
+            Self::Inswapper
+            | Self::Hyperswap
+            | Self::Simswap
+            | Self::Hififace
+            | Self::Facedancer => FaceTemplate::Arcface128,
             Self::Ghost => FaceTemplate::Arcface112V1,
             Self::Uniface => FaceTemplate::Ffhq512,
         }
@@ -105,7 +119,7 @@ impl SwapperKind {
 
     /// Whether identity is supplied as an aligned image rather than an embedding.
     pub fn needs_source_frame(self) -> bool {
-        matches!(self, Self::Uniface)
+        matches!(self, Self::Uniface | Self::Facedancer)
     }
 
     /// Whether this family needs a separate embedding converter model.
@@ -126,6 +140,7 @@ impl SwapperKind {
             Self::Uniface => "uniface",
             Self::Simswap => "simswap",
             Self::Hififace => "hififace",
+            Self::Facedancer => "facedancer",
         }
     }
 }
@@ -382,6 +397,45 @@ impl FaceSwapper {
     }
 
     /// One model pass on one aligned tile.
+    /// The two input names this model wants, found by name where possible.
+    ///
+    /// `target` and `source` are preferred because that is the convention most
+    /// exports follow. Anything else falls back to declaration order, which is
+    /// what a model with opaque names like `input_1` / `input_2` needs.
+    fn input_names(&self) -> Result<(String, String)> {
+        let declared: Vec<String> = self
+            .session
+            .inputs()
+            .iter()
+            .map(|input| input.name().to_string())
+            .collect();
+        if declared.len() < 2 {
+            return Err(FaceSwapError::InvalidInput(format!(
+                "A swapper needs two inputs - a target and a source - and this model declares {}",
+                declared.len()
+            )));
+        }
+
+        let find = |wanted: &str| {
+            declared
+                .iter()
+                .find(|name| name.to_ascii_lowercase().contains(wanted))
+                .cloned()
+        };
+
+        let target = find("target").unwrap_or_else(|| declared[0].clone());
+        let source = find("source")
+            .filter(|name| *name != target)
+            .unwrap_or_else(|| {
+                declared
+                    .iter()
+                    .find(|name| **name != target)
+                    .cloned()
+                    .unwrap_or_else(|| declared[1].clone())
+            });
+        Ok((target, source))
+    }
+
     fn run_tile(
         &mut self,
         target: &Array4<f32>,
@@ -412,21 +466,32 @@ impl FaceSwapper {
             .map(|output| output.name().to_string())
             .ok_or_else(|| FaceSwapError::Ort("swapper model declares no outputs".to_string()))?;
 
+        // The input names are DISCOVERED, not assumed.
+        //
+        // Every model this app shipped until now happened to use `target` and
+        // `source`, which is the convention FaceFusion's exports follow - so a
+        // hardcoded pair worked for six families and looked like a contract. It
+        // is not one. A model from any other export pipeline names its inputs
+        // whatever it likes, and the failure mode is an error at load rather
+        // than anything subtle, so looking them up costs nothing and unlocks
+        // models that were previously unwireable.
+        let (target_name, source_name) = self.input_names()?;
+
         // The outputs hold a borrow of the session, so take what we need and let
         // them drop before touching self again.
         let swapped = {
             let outputs = match source_frame {
                 Some(frame) => self.session.run(inputs![
-                    "target" => TensorRef::from_array_view(target_input.view())?,
-                    "source" => TensorRef::from_array_view(frame.view())?
+                    target_name.as_str() => TensorRef::from_array_view(target_input.view())?,
+                    source_name.as_str() => TensorRef::from_array_view(frame.view())?
                 ]),
                 None => {
                     let source = source_matrix.as_ref().ok_or_else(|| {
                         FaceSwapError::ProcessingError("missing source input".to_string())
                     })?;
                     self.session.run(inputs![
-                        "target" => TensorRef::from_array_view(target_input.view())?,
-                        "source" => TensorRef::from_array_view(source.view())?
+                        target_name.as_str() => TensorRef::from_array_view(target_input.view())?,
+                        source_name.as_str() => TensorRef::from_array_view(source.view())?
                     ])
                 }
             }
