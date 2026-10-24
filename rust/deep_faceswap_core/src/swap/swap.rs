@@ -1936,6 +1936,9 @@ impl SwapSession {
         }
 
         crate::tools::quality::record_faces(swapped);
+        // One entry per frame, so a clip can be judged as a whole afterwards
+        // rather than only by whichever frame finished last.
+        crate::tools::quality::push_frame();
         Ok(swapped)
     }
 

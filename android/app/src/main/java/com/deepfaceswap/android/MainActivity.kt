@@ -1463,6 +1463,27 @@ class MainActivity : Activity() {
             }
         }
 
+        // A clip is judged as a whole, not by whichever frame finished last. A
+        // mean on its own hides the failures, so the weakest frame is named.
+        val timeline = runCatching { org.json.JSONObject(NativeBridge.qualityTimeline()) }
+            .getOrNull()
+        val frames = timeline?.optInt("count", 0) ?: 0
+        if (frames > 1) {
+            val mean = if (timeline!!.isNull("meanId")) null else timeline.optDouble("meanId")
+            val weakestFrame = timeline.optInt("weakestFrame", -1)
+            val weakestId = if (timeline.isNull("weakestId")) null
+                else timeline.optDouble("weakestId")
+            if (mean != null) {
+                var summary = "Across $frames frames, identity averages " +
+                    "${"%.2f".format(mean)}"
+                if (weakestFrame >= 0 && weakestId != null) {
+                    summary += ", weakest ${"%.2f".format(weakestId)} at frame " +
+                        "${weakestFrame + 1}"
+                }
+                lines.add(summary)
+            }
+        }
+
         if (lines.isEmpty()) return
         showSheet("Quality report", lines, -1, null) { }
     }
@@ -2852,6 +2873,7 @@ class MainActivity : Activity() {
                 modelLabel = label,
             )
         }
+        NativeBridge.resetTimeline()
         setSwapBusy(true, "Preparing\u2026")
         if (!video) startPolling()
         requestNotificationConsent()
@@ -2908,6 +2930,7 @@ class MainActivity : Activity() {
             originalPath = target.absolutePath,
             modelLabel = label,
         )
+        NativeBridge.resetTimeline()
         setVideoBusy(true, "Preparing\u2026")
         requestNotificationConsent()
         SwapService.start(this)

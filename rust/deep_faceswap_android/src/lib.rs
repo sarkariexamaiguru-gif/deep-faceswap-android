@@ -1066,6 +1066,33 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_interpolateNat
     }
 }
 
+/// Clear the per-frame quality timeline. Called once at the start of a job.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_resetTimelineNative(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    deep_faceswap_core::tools::quality::reset_timeline();
+    let payload = serde_json::json!({ "ok": true }).to_string();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Every frame's numbers for the current job, as JSON.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityTimelineNative(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let payload = deep_faceswap_core::tools::quality::timeline_json();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// The quality report for the most recent frame, as JSON.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(

@@ -317,6 +317,10 @@ object NativeBridge {
 
     private external fun qualityReportNative(): String
 
+    private external fun resetTimelineNative(): String
+
+    private external fun qualityTimelineNative(): String
+
     private external fun setLandmarkModelNative(path: String): String
 
     private external fun setInterpolationNative(path: String): String
@@ -531,6 +535,15 @@ object NativeBridge {
      * occluder protected. An empty object when nothing has run.
      */
     fun qualityReport(): String = runCatching { qualityReportNative() }.getOrDefault("{}")
+
+    /** Clear the per-frame timeline. Call once, at the start of a job. */
+    fun resetTimeline() {
+        runCatching { resetTimelineNative() }
+    }
+
+    /** Every frame's numbers for the current job, as JSON. */
+    fun qualityTimeline(): String =
+        runCatching { qualityTimelineNative() }.getOrDefault("{}")
 
     /**
      * Point the visibility check at an HRFFA model, or pass an empty path to

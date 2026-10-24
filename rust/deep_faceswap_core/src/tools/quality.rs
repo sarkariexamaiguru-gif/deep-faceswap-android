@@ -33,6 +33,20 @@ pub struct QualityReport {
     pub faces_swapped: usize,
 }
 
+/// One frame's numbers, kept so a whole clip can be judged rather than only the
+/// frame that happened to finish last.
+#[derive(Clone, serde::Serialize)]
+pub struct FrameScore {
+    pub frame: usize,
+    pub id_similarity: Option<f64>,
+    pub sharpness_before: Option<f64>,
+    pub sharpness_after: Option<f64>,
+    pub occlusion_coverage: Option<f64>,
+}
+
+/// Every frame of the current job, in order.
+static TIMELINE: Mutex<Vec<FrameScore>> = Mutex::new(Vec::new());
+
 static REPORT: Mutex<QualityReport> = Mutex::new(QualityReport {
     id_similarity: None,
     sharpness_before: None,
@@ -71,6 +85,72 @@ pub fn record_id(value: f64) {
 
 pub fn record_occlusion(coverage: f64) {
     lock().occlusion_coverage = Some(coverage);
+}
+
+/// Clear the timeline. Called once at the start of a job, not per frame.
+pub fn reset_timeline() {
+    match TIMELINE.lock() {
+        Ok(mut timeline) => timeline.clear(),
+        Err(poisoned) => poisoned.into_inner().clear(),
+    }
+}
+
+/// Add the current report to the timeline. Called once per frame.
+pub fn push_frame() {
+    let report = lock().clone();
+    if report.faces_swapped == 0 {
+        return;
+    }
+    let mut timeline = match TIMELINE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let frame = timeline.len();
+    timeline.push(FrameScore {
+        frame,
+        id_similarity: report.id_similarity,
+        sharpness_before: report.sharpness_before,
+        sharpness_after: report.sharpness_after,
+        occlusion_coverage: report.occlusion_coverage,
+    });
+}
+
+/// The timeline as JSON: a summary plus the frames worth looking at.
+///
+/// A whole-clip average hides everything, because the failures are always in a
+/// few seconds. So this reports the weakest frame by name as well as the mean.
+pub fn timeline_json() -> String {
+    let timeline = match TIMELINE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let frames = timeline.clone();
+    drop(timeline);
+
+    let scored: Vec<&FrameScore> = frames.iter().filter(|f| f.id_similarity.is_some()).collect();
+    let mean = if scored.is_empty() {
+        None
+    } else {
+        Some(scored.iter().filter_map(|f| f.id_similarity).sum::<f64>() / scored.len() as f64)
+    };
+    let weakest = scored
+        .iter()
+        .min_by(|a, b| {
+            a.id_similarity
+                .partial_cmp(&b.id_similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|f| (f.frame, f.id_similarity.unwrap_or(0.0)));
+
+    serde_json::json!({
+        "count": frames.len(),
+        "scored": scored.len(),
+        "meanId": mean,
+        "weakestFrame": weakest.map(|w| w.0),
+        "weakestId": weakest.map(|w| w.1),
+        "frames": frames,
+    })
+    .to_string()
 }
 
 /// The report as JSON, for the bridge.
