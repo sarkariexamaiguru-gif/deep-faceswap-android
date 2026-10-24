@@ -383,11 +383,12 @@ class MainActivity : Activity() {
     private fun renderNav() {
         navRow.removeAllViews()
         listOf(
+            // Four places, not seven. Swap and Video left the bar because they
+            // are tools, and tools live on Home. Tools merged into Models -
+            // they were two tabs doing one job: managing what the app can do.
+            // A tab bar is for places you can BE.
             "home" to ("Home" to R.drawable.ic_sparkle),
-            "swap" to ("Swap" to R.drawable.ic_swap),
-            "video" to ("Video" to R.drawable.ic_video),
-            "history" to ("History" to R.drawable.ic_history),
-            "tools" to ("Tools" to R.drawable.ic_tools),
+            "history" to ("Library" to R.drawable.ic_history),
             "models" to ("Models" to R.drawable.ic_cube),
             "settings" to ("Settings" to R.drawable.ic_settings),
         ).forEach { (key, spec) ->
@@ -400,9 +401,9 @@ class MainActivity : Activity() {
                 layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 isClickable = true
                 contentDescription = label
-                addView(RoopUi.iconView(this@MainActivity, icon, 24,
+                addView(RoopUi.iconView(this@MainActivity, icon, 26,
                     if (active) R.color.blue else R.color.ink_secondary))
-                addView(RoopUi.text(this@MainActivity, label, 11f,
+                addView(RoopUi.text(this@MainActivity, label, 11.5f,
                     if (active) R.color.blue else R.color.ink_secondary, if (active) 1 else 0)
                     .apply { layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 0, 3, 0, 0) })
@@ -1396,7 +1397,7 @@ class MainActivity : Activity() {
 
     private fun buildHistoryScreen(): View {
         val col = pageColumn()
-        col.addView(RoopUi.screenTitle(this, "History"))
+        col.addView(RoopUi.screenTitle(this, "Library"))
         col.addView(RoopUi.body(
             this, "All your face swap results, privately saved on this device.",
         ).apply {
@@ -2992,7 +2993,11 @@ class MainActivity : Activity() {
     // -------------------------------------------------------------- misc
 
     private fun showOverflow() {
-        showSheet("More options", listOf("Reset inputs", "Settings", "Help & Guide"), -1, null) { pick ->
+        showSheet(
+            "More options",
+            listOf("Reset inputs", "Tools and diagnostics", "Settings", "Help & Guide"),
+            -1, null,
+        ) { pick ->
             when (pick) {
                 0 -> {
                     sourceFiles.clear(); targetFile = null; faces = null; mappings.clear()
@@ -3000,7 +3005,8 @@ class MainActivity : Activity() {
                     refreshSwap(); refreshVideo()
                     toast("Selections reset")
                 }
-                1 -> show("settings")
+                1 -> show("tools")
+                2 -> show("settings")
                 else -> showHelp()
             }
         }
