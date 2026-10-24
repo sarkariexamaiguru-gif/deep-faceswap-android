@@ -317,6 +317,8 @@ object NativeBridge {
 
     private external fun qualityReportNative(): String
 
+    private external fun setLandmarkModelNative(path: String): String
+
     private external fun sessionSwapFrameRawWorker(
         worker: Int,
         width: Int,
@@ -519,6 +521,14 @@ object NativeBridge {
      * occluder protected. An empty object when nothing has run.
      */
     fun qualityReport(): String = runCatching { qualityReportNative() }.getOrDefault("{}")
+
+    /**
+     * Point the visibility check at an HRFFA model, or pass an empty path to
+     * turn it off. Returns whether a model is loaded.
+     */
+    fun setLandmarkModel(path: String): Boolean = runCatching {
+        setLandmarkModelNative(path).contains("\"ready\":true")
+    }.getOrDefault(false)
 
     /** Release the session and free its models. Safe to call when none is open. */
     fun closeSession() {

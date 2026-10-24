@@ -11,6 +11,7 @@
 
 pub mod edit;
 pub mod image2image;
+pub mod landmarks;
 pub mod occlusion;
 pub mod quality;
 pub mod segmentation;

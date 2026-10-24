@@ -154,6 +154,10 @@ class MainActivity : Activity() {
         // or a microphone is the failure people notice first.
         NativeBridge.setOcclusion(occlusionModelPath())
 
+        // Visibility, on top of pixels: which landmarks are behind something.
+        // Also on when the model is present, for the same reason.
+        NativeBridge.setLandmarkModel(landmarkModelPath())
+
         setContentView(buildShell())
         SwapBus.addListener(swapListener)
 
@@ -1459,6 +1463,15 @@ class MainActivity : Activity() {
         if (lines.isEmpty()) return
         showSheet("Quality report", lines, -1, null) { }
     }
+
+    /** The HRFFA visibility model if installed, otherwise an empty path. */
+    private fun landmarkModelPath(): String =
+        models.models()
+            .firstOrNull { it.fileName == ModelManager.LANDMARK_MODEL_FILE }
+            ?.takeIf { it.installed }
+            ?.file
+            ?.absolutePath
+            ?: ""
 
     /** The XSeg model if it has been installed, otherwise an empty path. */
     private fun occlusionModelPath(): String =

@@ -125,6 +125,10 @@ class ModelManager(private val context: Context) {
             url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
         ),
         Model(
+            "Visibility · HRFFA", LANDMARK_MODEL_FILE, toolsDir, false, Source.URL,
+            url = LANDMARK_URL, approxSize = "7 MB", licence = "MIT",
+        ),
+        Model(
             "Face restorer · GPEN", GPEN_FILE, modelsDir, false, Source.URL,
             url = GPEN_URL, approxSize = "72 MB", licence = "Non-commercial",
         ),
@@ -509,6 +513,9 @@ class ModelManager(private val context: Context) {
         /** JPEG artifact remover. */
         const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
 
+        /** Visibility: which landmarks are behind something. */
+        const val LANDMARK_MODEL_FILE = "hrffa_hg0_ibug68_1x3x256x256.onnx"
+
         /** A smaller face restorer: a quarter of GFPGAN's size for the same job. */
         const val GPEN_FILE = "GPEN-BFR-256.onnx"
 
@@ -551,6 +558,14 @@ class ModelManager(private val context: Context) {
         private const val GPEN_URL =
             "https://github.com/harisreedhar/Face-Upscalers-ONNX/releases/download/Models/" +
                 "GPEN-BFR-256.onnx"
+
+        // From the `weights` release of the HRFFA repository. The CNN student at
+        // 256: 1.6M parameters, 0.70 GMACs, 5.2 ms on a desktop CPU - the
+        // fastest of the six published variants, and the accuracy tier that
+        // matters least here because this only TIGHTENS the occlusion mask.
+        private const val LANDMARK_URL =
+            "https://github.com/PINTO0309/High-Angle_Robust_Fast_FaceAlignment/releases/" +
+                "download/weights/hrffa_hg0_ibug68_1x3x256x256.onnx"
 
         private const val XSEG_1_URL =
             "https://github.com/facefusion/facefusion-assets/releases/download/models-3.1.0/xseg_1.onnx"

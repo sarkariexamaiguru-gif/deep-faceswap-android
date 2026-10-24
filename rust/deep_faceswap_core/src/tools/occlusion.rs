@@ -251,7 +251,39 @@ pub fn prepare(image: &Array3<u8>, bbox: &BBox) -> Option<OcclusionData> {
     }
 
     let original = image.slice(s![y0..y1, x0..x1, ..]).to_owned();
-    let mask = mask_for(&mut occluder.session, &original).ok()?;
+    let mut mask = mask_for(&mut occluder.session, &original).ok()?;
+
+    // Geometry, on top of pixels. Where an object is skin-coloured - a hand, a
+    // forearm - XSeg can be fooled into calling it face. HRFFA looks at the
+    // landmarks instead and says which of them are behind something, which is a
+    // signal colour cannot fake.
+    //
+    // Used to TIGHTEN only: a hidden point clears a small disc in the mask, so
+    // the worst this can do is leave a little more of the original alone.
+    if crate::tools::landmarks::is_ready() {
+        if let Some(points) = crate::tools::landmarks::predict(image, bbox) {
+            let (mh, mw, _) = mask.dim();
+            let radius = crate::tools::landmarks::protect_radius(mw, mh);
+            for point in points.iter().filter(|p| p.occluded) {
+                let px = point.x.round() as isize - x0 as isize;
+                let py = point.y.round() as isize - y0 as isize;
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        if dx * dx + dy * dy > radius * radius {
+                            continue;
+                        }
+                        let tx = px + dx;
+                        let ty = py + dy;
+                        if tx < 0 || ty < 0 || tx as usize >= mw || ty as usize >= mh {
+                            continue;
+                        }
+                        // Low means "not skin", which means "leave it alone".
+                        mask[[ty as usize, tx as usize, 0]] = 0;
+                    }
+                }
+            }
+        }
+    }
     Some(OcclusionData {
         x: x0,
         y: y0,

@@ -954,6 +954,26 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setOcclusionNa
     }
 }
 
+/// Point the visibility check at an HRFFA model. An empty path turns it off.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setLandmarkModelNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jstring {
+    let text = jstring_to_string(&mut env, &path);
+    deep_faceswap_core::tools::landmarks::set_model_path(&text);
+    let payload = serde_json::json!({
+        "ok": true,
+        "ready": deep_faceswap_core::tools::landmarks::is_ready(),
+    })
+    .to_string();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// The quality report for the most recent frame, as JSON.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(
