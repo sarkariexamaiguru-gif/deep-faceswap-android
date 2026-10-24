@@ -163,6 +163,7 @@ class MainActivity : Activity() {
 
         setContentView(buildShell())
         SwapBus.addListener(swapListener)
+        DebugLog.add("app", "started")
 
         screens["home"] = buildHomeScreen().also { content.addView(it) }
         screens["swap"] = buildSwapScreen().also { content.addView(it) }
@@ -1565,6 +1566,59 @@ class MainActivity : Activity() {
     }
 
     /**
+     * The debug log: what was asked for, what was chosen, and where it stopped.
+     */
+    private fun showDebugLog() {
+        val text = DebugLog.environment(this) + "\n\n" + DebugLog.dump()
+        val sheet = Dialog(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        box.addView(TextView(this).apply {
+            text = "Debug log"
+            textSize = 17f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0E1424"))
+        })
+        box.addView(TextView(this).apply {
+            text = text
+            textSize = 11f
+            setTextColor(Color.parseColor("#4E5C7C"))
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(0, dp(10), 0, dp(10))
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+        ))
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(button("Copy") {
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(
+                android.content.ClipData.newPlainText("LabPic debug log", text),
+            )
+            toast("Copied")
+        })
+        actions.addView(space(8))
+        actions.addView(button("Clear") {
+            DebugLog.clear()
+            sheet.dismiss()
+            toast("Log cleared")
+        })
+        actions.addView(space(8))
+        actions.addView(button("Close") { sheet.dismiss() })
+        box.addView(actions)
+        sheet.setContentView(
+            android.widget.ScrollView(this).apply { addView(box) },
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        sheet.show()
+    }
+
+    /**
      * Load every model the pipeline will actually use, and say what happened.
      *
      * A swap failing gives one sentence and no way to tell which of six files
@@ -2899,6 +2953,14 @@ class MainActivity : Activity() {
         val grid = qualityGrid()
         val label = modelOptions().firstOrNull { it.first == swapperFile }?.second ?: swapperFile
 
+        DebugLog.add("swap", "request: video=$video target=${target.name} sources=${sources.size}")
+        DebugLog.add("swap", "swapper=$swapperFile boost=$grid strength=$strength label=$label")
+        DebugLog.add("swap", "detector=${File(models.detectorPath).name} " +
+            "recogniser=${File(models.recognizerPath).name}")
+        DebugLog.add("swap", "occlusion=${File(occlusionModelPath()).name.ifEmpty { "off" }} " +
+            "visibility=${File(landmarkModelPath()).name.ifEmpty { "off" }} " +
+            "restore=${if (restoreOn) File(models.enhancerPath).name else "off"}")
+
         // The work is handed to a foreground service, so it survives the app
         // being backgrounded or the screen switching off.
         SwapBus.pending = if (video) {
@@ -2989,6 +3051,7 @@ class MainActivity : Activity() {
             modelLabel = label,
         )
         NativeBridge.resetTimeline()
+        DebugLog.add("video", "job handed to the service")
         setVideoBusy(true, "Preparing\u2026")
         requestNotificationConsent()
         SwapService.start(this)
@@ -3023,6 +3086,10 @@ class MainActivity : Activity() {
             swapStatus.text = state.message
         }
 
+        if (state.message.isNotBlank()) {
+            DebugLog.add("stage", "${state.stage} \u00b7 ${state.message}")
+        }
+
         when (state.stage) {
             SwapBus.Stage.DONE -> {
                 stopPolling()
@@ -3044,9 +3111,12 @@ class MainActivity : Activity() {
                 setSwapBusy(false, "")
                 setVideoBusy(false, "")
                 val message = state.error ?: "The swap could not be completed."
+                // The full text, not a summary. This is the line the whole debug
+                // log exists to deliver.
+                DebugLog.add("FAILED", message)
                 swapStatus.text = message
                 vidStatus.text = message
-                toast("Swap failed")
+                toast("Swap failed \u00b7 open the debug log")
             }
             else -> Unit
         }
@@ -3425,8 +3495,8 @@ class MainActivity : Activity() {
     private fun showOverflow() {
         showSheet(
             "More options",
-            listOf("Reset inputs", "Model health check", "Tools and diagnostics",
-                "Settings", "Help & Guide"),
+            listOf("Reset inputs", "Debug log", "Model health check",
+                "Tools and diagnostics", "Settings", "Help & Guide"),
             -1, null,
         ) { pick ->
             when (pick) {
@@ -3436,9 +3506,10 @@ class MainActivity : Activity() {
                     refreshSwap(); refreshVideo()
                     toast("Selections reset")
                 }
-                1 -> runHealthCheck()
-                2 -> show("tools")
-                3 -> show("settings")
+                1 -> showDebugLog()
+                2 -> runHealthCheck()
+                3 -> show("tools")
+                4 -> show("settings")
                 else -> showHelp()
             }
         }
