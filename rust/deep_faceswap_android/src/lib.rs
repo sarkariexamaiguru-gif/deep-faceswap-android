@@ -947,19 +947,6 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportN
     }
 }
 
-/// The quality report for the most recent frame, as JSON.
-#[no_mangle]
-pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(
-    mut env: JNIEnv,
-    _class: JClass,
-) -> jstring {
-    let payload = deep_faceswap_core::tools::quality::report_json();
-    match env.new_string(payload) {
-        Ok(value) => value.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
-}
-
 /// Release the swap session and free its models.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_sessionClose(
