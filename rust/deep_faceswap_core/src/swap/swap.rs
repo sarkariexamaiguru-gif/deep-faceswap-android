@@ -23,6 +23,7 @@ use crate::video::{
 };
 use crate::{log_additional, log_main};
 use ndarray::Array3;
+use ndarray::s;
 use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::time::Instant;
@@ -131,6 +132,25 @@ pub fn swap_single_pair(
     )
 }
 
+/// A detected face box, clamped to the image and inset a little so the
+/// compositing pass never works on the very edge of the frame.
+fn face_box(image: &Array3<u8>, bbox: &crate::types::BBox) -> Option<(usize, usize, usize, usize)> {
+    let (h, w, _) = image.dim();
+    let bw = bbox.x2 - bbox.x1;
+    let bh = bbox.y2 - bbox.y1;
+    let inset_x = bw * 0.05;
+    let inset_y = bh * 0.05;
+    let x0 = (bbox.x1 + inset_x).floor().max(0.0) as usize;
+    let y0 = (bbox.y1 + inset_y).floor().max(0.0) as usize;
+    let x1 = ((bbox.x2 - inset_x).ceil() as usize).min(w);
+    let y1 = ((bbox.y2 - inset_y).ceil() as usize).min(h);
+    if x1 <= x0 + 2 || y1 <= y0 + 2 {
+        None
+    } else {
+        Some((x0, y0, x1, y1))
+    }
+}
+
 /// Swap a single source face into a single target face, honouring `opts`.
 ///
 /// # Arguments
@@ -201,6 +221,13 @@ pub fn swap_single_pair_opts(
     // the last moment the original pixels exist.
     let sharpness_before = crate::tools::quality::face_sharpness(target_image, &target_face.bbox);
 
+    // The target's own skin, kept for the compositing pass. Frequency separation
+    // needs the original detail, and after the paste it is gone.
+    let compositing_box = face_box(target_image, &target_face.bbox);
+    let original_region = compositing_box
+        .as_ref()
+        .map(|(x0, y0, x1, y1)| target_image.slice(s![*y0..*y1, *x0..*x1, ..]).to_owned());
+
     // What is in front of the face, worked out BEFORE the swap - afterwards
     // the pixels we need to put back are gone.
     // On when the option is set, or when an occluder happens to be loaded - a
@@ -270,6 +297,25 @@ pub fn swap_single_pair_opts(
     if let Some(ref data) = occlusion_data {
         log_additional!("occlusion", "Leaving the pixels in front of the face alone");
         crate::tools::occlusion::restore(target_image, data);
+    }
+
+    // The compositing pass: keep the swapped face's form, restore the TARGET's
+    // own skin texture. Where the swap did not reach, this is the identity
+    // transform, so it is safe to run over the whole box.
+    if let (Some((x0, y0, x1, y1)), Some(original)) = (compositing_box, original_region) {
+        let swapped_region = target_image.slice(s![y0..y1, x0..x1, ..]).to_owned();
+        let combined = crate::tools::compositing::separate_frequencies(
+            &swapped_region,
+            &original,
+            crate::tools::compositing::DEFAULT_TEXTURE,
+        );
+        for y in 0..(y1 - y0) {
+            for x in 0..(x1 - x0) {
+                for c in 0..3 {
+                    target_image[[y0 + y, x0 + x, c]] = combined[[y, x, c]];
+                }
+            }
+        }
     }
 
     // Quality: did the face get softer or crisper? Same box, after every pass.

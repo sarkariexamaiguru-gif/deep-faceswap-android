@@ -9,6 +9,7 @@
 //! would let whoever controls it choose what the app runs; a compiled table with
 //! a hash per file means a swapped mirror is caught, not executed.
 
+pub mod compositing;
 pub mod edit;
 pub mod image2image;
 pub mod landmarks;
