@@ -158,6 +158,9 @@ class MainActivity : Activity() {
         // Also on when the model is present, for the same reason.
         NativeBridge.setLandmarkModel(landmarkModelPath())
 
+        // Interpolation, for fluid GIFs. On when the model is present.
+        rifeReady = NativeBridge.setInterpolation(interpolationModelPath())
+
         setContentView(buildShell())
         SwapBus.addListener(swapListener)
 
@@ -1540,6 +1543,15 @@ class MainActivity : Activity() {
         return (sumSquares / count) - mean * mean
     }
 
+    /** The RIFE interpolation model if installed, otherwise an empty path. */
+    private fun interpolationModelPath(): String =
+        models.models()
+            .firstOrNull { it.fileName == ModelManager.RIFE_FILE }
+            ?.takeIf { it.installed }
+            ?.file
+            ?.absolutePath
+            ?: ""
+
     /** The HRFFA visibility model if installed, otherwise an empty path. */
     private fun landmarkModelPath(): String =
         models.models()
@@ -1846,8 +1858,12 @@ class MainActivity : Activity() {
             }
             val outDir = File(getExternalFilesDir(null), "outputs").apply { mkdirs() }
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            // Interpolate between the samples when RIFE is present. Sixteen
+            // frames become thirty-one, which is the difference between motion
+            // and a flipbook - and it is what the model is for.
+            val smoothed = smoothForGif(frames)
             val out = File(outDir, "roop_$stamp.gif")
-            val ok = GifWriter.write(out, frames, 80)
+            val ok = GifWriter.write(out, smoothed, if (smoothed.size > frames.size) 40 else 80)
             runOnUiThread {
                 if (ok && out.isFile) {
                     registerResult(out, clip, "GIF")
@@ -1857,6 +1873,43 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Add the frames that were never filmed.
+     *
+     * A model that cannot be loaded, or a pair it refuses, simply produces no
+     * extra frame - the GIF is still made, just at the sampled rate.
+     */
+    private fun smoothForGif(frames: List<Bitmap>): List<Bitmap> {
+        if (frames.size < 2 || !rifeReady) return frames
+        val out = ArrayList<Bitmap>(frames.size * 2 - 1)
+        for (i in frames.indices) {
+            out.add(frames[i])
+            if (i == frames.size - 1) break
+            val a = frames[i]
+            val b = frames[i + 1]
+            if (a.width != b.width || a.height != b.height) continue
+            val middle = interpolate(a, b) ?: continue
+            out.add(middle)
+        }
+        return out
+    }
+
+    private var rifeReady = false
+
+    private fun interpolate(a: Bitmap, b: Bitmap): Bitmap? {
+        val w = a.width
+        val h = a.height
+        val first = ByteArray(w * h * 4)
+        val second = ByteArray(w * h * 4)
+        a.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(first))
+        b.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(second))
+        val result = NativeBridge.interpolate(w, h, first, second, 0.5f) ?: return null
+        if (result.size < w * h * 4) return null
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+            copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(result))
+        }
     }
 
     /** Evenly spaced frames, scaled so a GIF stays a sane size. */

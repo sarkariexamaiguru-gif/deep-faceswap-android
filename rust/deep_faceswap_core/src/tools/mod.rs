@@ -12,6 +12,7 @@
 pub mod compositing;
 pub mod edit;
 pub mod image2image;
+pub mod interpolate;
 pub mod landmarks;
 pub mod occlusion;
 pub mod quality;

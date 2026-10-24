@@ -319,6 +319,16 @@ object NativeBridge {
 
     private external fun setLandmarkModelNative(path: String): String
 
+    private external fun setInterpolationNative(path: String): String
+
+    private external fun interpolateNative(
+        width: Int,
+        height: Int,
+        first: ByteArray,
+        second: ByteArray,
+        t: Float,
+    ): ByteArray?
+
     private external fun sessionSwapFrameRawWorker(
         worker: Int,
         width: Int,
@@ -529,6 +539,21 @@ object NativeBridge {
     fun setLandmarkModel(path: String): Boolean = runCatching {
         setLandmarkModelNative(path).contains("\"ready\":true")
     }.getOrDefault(false)
+
+    /** Point interpolation at a RIFE model, or pass an empty path to turn it off. */
+    fun setInterpolation(path: String): Boolean = runCatching {
+        setInterpolationNative(path).contains("\"ready\":true")
+    }.getOrDefault(false)
+
+    /**
+     * The frame between two RGBA images, or null when it could not be made.
+     *
+     * Null is a normal outcome - the caller simply does not add the frame - so
+     * this never throws for a missing model.
+     */
+    fun interpolate(width: Int, height: Int, first: ByteArray, second: ByteArray, t: Float):
+        ByteArray? = runCatching { interpolateNative(width, height, first, second, t) }
+        .getOrNull()
 
     /** Release the session and free its models. Safe to call when none is open. */
     fun closeSession() {

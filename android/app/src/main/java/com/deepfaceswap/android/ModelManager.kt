@@ -125,6 +125,30 @@ class ModelManager(private val context: Context) {
             url = FBCNN_URL, approxSize = "137 MB", licence = "Apache-2.0",
         ),
         Model(
+            "Interpolation · RIFE", RIFE_FILE, toolsDir, false, Source.URL,
+            url = RIFE_URL, approxSize = "17 MB", licence = "MIT",
+        ),
+        Model(
+            "FaceDancer", FACEDANCER_FILE, toolsDir, false, Source.URL,
+            url = SWAPPER_MIRROR + FACEDANCER_FILE,
+            approxSize = "90 MB", licence = "CC BY-NC-SA 4.0",
+        ),
+        Model(
+            "SimSwap 256", SIMSWAP_FILE, toolsDir, false, Source.URL,
+            url = SWAPPER_MIRROR + SIMSWAP_FILE,
+            approxSize = "220 MB", licence = "Non-commercial",
+        ),
+        Model(
+            "SimSwap converter", SIMSWAP_CONVERTER_FILE, toolsDir, false, Source.URL,
+            url = SWAPPER_MIRROR + SIMSWAP_CONVERTER_FILE,
+            approxSize = "small", licence = "Non-commercial",
+        ),
+        Model(
+            "HifiFace", HIFIFACE_FILE, toolsDir, false, Source.URL,
+            url = "https://huggingface.co/facefusion/models-3.1.0/resolve/main/" + HIFIFACE_FILE,
+            approxSize = "204 MB", licence = "Unknown",
+        ),
+        Model(
             "Upscaler · x4plus", ESRGAN_X4_FILE, toolsDir, false, Source.URL,
             url = ESRGAN_X4_URL, approxSize = "67 MB", licence = "BSD-3-Clause",
         ),
@@ -529,6 +553,15 @@ class ModelManager(private val context: Context) {
         /** JPEG artifact remover. */
         const val FBCNN_FILE = "fbcnn_color_fp16.onnx"
 
+        /** Frame interpolation, for fluid GIFs. */
+        const val RIFE_FILE = "RIFE_HDv3.onnx"
+
+        /** The other swapper families, listed so they can be downloaded and tried. */
+        const val FACEDANCER_FILE = "FaceDancer_config_c_HQ.onnx"
+        const val SIMSWAP_FILE = "simswap_256.onnx"
+        const val SIMSWAP_CONVERTER_FILE = "arcface_simswap.onnx"
+        const val HIFIFACE_FILE = "hififace_unofficial_256.onnx"
+
         /** A proper quality tier above the 5 MB upscaler. */
         const val ESRGAN_X4_FILE = "Real-ESRGAN-x4plus.onnx"
 
@@ -596,6 +629,15 @@ class ModelManager(private val context: Context) {
         // Repositories verified in the research sweep; the exact asset names
         // follow the patterns those repos publish. A wrong name fails loudly at
         // download time rather than silently.
+        // RIFE from the reference ONNX export, which is published as a file in
+        // the repository rather than as a release asset.
+        private const val RIFE_URL =
+            "https://raw.githubusercontent.com/hpc203/Real-Time-Frame-Interpolation-onnxrun/" +
+                "main/RIFE_HDv3.onnx"
+
+        private const val SWAPPER_MIRROR =
+            "https://huggingface.co/netrunner-exe/Insight-Swap-models-onnx/resolve/main/"
+
         private const val ESRGAN_X4_URL =
             "https://huggingface.co/qualcomm/Real-ESRGAN-x4plus/resolve/main/Real-ESRGAN-x4plus.onnx"
         private const val SWIN2SR_URL =

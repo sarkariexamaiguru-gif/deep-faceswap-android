@@ -974,6 +974,98 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setLandmarkMod
     }
 }
 
+/// Point interpolation at a RIFE model. An empty path turns it off.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_setInterpolationNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jstring {
+    let text = jstring_to_string(&mut env, &path);
+    deep_faceswap_core::tools::interpolate::set_model_path(&text);
+    let payload = serde_json::json!({
+        "ok": true,
+        "ready": deep_faceswap_core::tools::interpolate::is_ready(),
+    })
+    .to_string();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// The frame `t` of the way from one RGBA image to another. Null if it could
+/// not be made, which the caller treats as "just do not add the frame".
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_interpolateNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    width: jint,
+    height: jint,
+    first: JByteArray,
+    second: JByteArray,
+    t: jfloat,
+) -> jbyteArray {
+    let w = width.max(0) as usize;
+    let h = height.max(0) as usize;
+    if w == 0 || h == 0 {
+        return std::ptr::null_mut();
+    }
+
+    let a = match env.convert_byte_array(&first) {
+        Ok(bytes) => bytes,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let b = match env.convert_byte_array(&second) {
+        Ok(bytes) => bytes,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    if a.len() < w * h * 4 || b.len() < w * h * 4 {
+        return std::ptr::null_mut();
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let to_rgb = |bytes: &[u8]| {
+            let mut image = Array3::<u8>::zeros((h, w, 3));
+            for y in 0..h {
+                for x in 0..w {
+                    let i = (y * w + x) * 4;
+                    image[[y, x, 0]] = bytes[i];
+                    image[[y, x, 1]] = bytes[i + 1];
+                    image[[y, x, 2]] = bytes[i + 2];
+                }
+            }
+            image
+        };
+        let middle = deep_faceswap_core::tools::interpolate::between(
+            &to_rgb(&a),
+            &to_rgb(&b),
+            t,
+        )?;
+
+        let (oh, ow, _) = middle.dim();
+        let mut bytes = Vec::with_capacity(oh * ow * 4);
+        for y in 0..oh {
+            for x in 0..ow {
+                bytes.push(middle[[y, x, 0]]);
+                bytes.push(middle[[y, x, 1]]);
+                bytes.push(middle[[y, x, 2]]);
+                bytes.push(255);
+            }
+        }
+        Some(bytes)
+    }));
+
+    let bytes = match result {
+        Ok(Some(bytes)) => bytes,
+        _ => return std::ptr::null_mut(),
+    };
+    match env.byte_array_from_slice(&bytes) {
+        Ok(array) => array.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// The quality report for the most recent frame, as JSON.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(
