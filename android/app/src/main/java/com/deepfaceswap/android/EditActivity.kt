@@ -48,6 +48,56 @@ class EditActivity : Activity() {
     private var mono = false
     private var autoColour = false
     private var look = 0
+
+    /**
+     * A .cube file the user picked.
+     *
+     * The thirteen built-in looks are arithmetic and invented here. A LUT is
+     * somebody else's colour science - a real Amaro or Clarendon - which is the
+     * difference between "a filter" and a name people recognise.
+     */
+    private var lutPath = ""
+
+    private val lutRequest = 7306
+
+    /**
+     * Pick a .cube through the system picker.
+     *
+     * The file is copied into the app's own storage first, because the picker's
+     * grant is temporary and the path has to survive being handed to the engine
+     * on every render.
+     */
+    private fun chooseLut() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        runCatching { startActivityForResult(intent, lutRequest) }
+    }
+
+    private fun adoptLut(uri: android.net.Uri) {
+        val copied = runCatching {
+            val target = File(cacheDir, "look.cube")
+            contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            target.takeIf { it.isFile && it.length() > 0L }
+        }.getOrNull()
+        if (copied == null) {
+            statusView.text = "That file could not be read as a LUT."
+            return
+        }
+        lutPath = copied.absolutePath
+        statusView.text = "LUT applied. Tap LUT again to pick another."
+        render()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == lutRequest && resultCode == RESULT_OK) {
+            data?.data?.let { adoptLut(it) }
+        }
+    }
     private var rotation = 0
     private var flipH = false
 
@@ -95,6 +145,8 @@ class EditActivity : Activity() {
             label("Edit", 20f, "#0E1424", bold = true),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
+        header.addView(button(if (lutPath.isEmpty()) "LUT" else "LUT \u00b7 on") { chooseLut() })
+        header.addView(space(8))
         header.addView(button("Choose") { choosePhoto() })
         header.addView(space(8))
         header.addView(button("Save") { save() })
@@ -200,6 +252,7 @@ class EditActivity : Activity() {
         put("mono", mono)
         put("auto_colour", autoColour)
         put("look", look)
+        put("lut_path", lutPath)
         put("rotate", rotation)
         put("flip_h", flipH)
     }.toString()

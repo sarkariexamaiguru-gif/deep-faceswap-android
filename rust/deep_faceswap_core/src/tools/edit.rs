@@ -8,6 +8,7 @@
 use crate::types::{FaceSwapError, Result};
 use ndarray::{s, Array3};
 use serde::Deserialize;
+use std::sync::Mutex;
 
 /// Every adjustment, in one structure.
 ///
@@ -46,6 +47,12 @@ pub struct EditParams {
     /// Exact output size. Zero means leave it.
     pub resize_w: u32,
     pub resize_h: u32,
+    /// A .cube 3D LUT to apply after the look and before mono. Empty for none.
+    ///
+    /// The thirteen built-in looks are arithmetic and invented here. A LUT is
+    /// somebody else's colour science - a real Amaro or Clarendon - and the
+    /// difference is that these carry names people recognise.
+    pub lut_path: String,
 }
 
 impl Default for EditParams {
@@ -66,6 +73,7 @@ impl Default for EditParams {
             mono: false,
             auto_colour: false,
             look: 0,
+            lut_path: String::new(),
             resize_w: 0,
             resize_h: 0,
         }
@@ -99,6 +107,9 @@ pub fn apply(image: &Array3<u8>, params: &EditParams) -> Result<Array3<u8>> {
     }
     if params.look > 0 {
         out = look(&out, params.look);
+    }
+    if !params.lut_path.is_empty() {
+        out = apply_lut(&out, &params.lut_path);
     }
     if params.sharpen > 0.0 {
         out = unsharp(&out, params.sharpen.clamp(0.0, 1.0));
@@ -267,6 +278,121 @@ fn grade(image: &Array3<u8>, p: &EditParams) -> Array3<u8> {
             out[[y, x, 0]] = r.clamp(0.0, 255.0) as u8;
             out[[y, x, 1]] = g.clamp(0.0, 255.0) as u8;
             out[[y, x, 2]] = b.clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
+}
+
+/// A parsed 3D LUT: `size` samples per axis, red varying fastest, which is
+/// what the .cube format specifies.
+#[derive(Clone)]
+struct Lut3d {
+    size: usize,
+    table: Vec<[f32; 3]>,
+}
+
+/// One LUT held at a time. A 33-cube is 36k lines to parse, which is far too
+/// much to redo for every edit of the same image.
+static LUT_CACHE: Mutex<Option<(String, Lut3d)>> = Mutex::new(None);
+
+/// Read a .cube file.
+///
+/// Directives other than the size - TITLE, DOMAIN_MIN, DOMAIN_MAX - are skipped
+/// rather than parsed, because failing on one would reject a perfectly good LUT
+/// for carrying a title.
+fn load_cube(path: &str) -> Option<Lut3d> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut size = 0usize;
+    let mut table: Vec<[f32; 3]> = Vec::new();
+
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("LUT_3D_SIZE") {
+            size = rest.trim().parse().ok()?;
+            table.reserve(size.saturating_mul(size).saturating_mul(size));
+            continue;
+        }
+        // Any other directive starts with a letter; a data line starts with a
+        // number or a minus sign.
+        if line.chars().next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false) {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let r: f32 = parts.next()?.parse().ok()?;
+        let g: f32 = parts.next()?.parse().ok()?;
+        let b: f32 = parts.next()?.parse().ok()?;
+        table.push([r, g, b]);
+    }
+
+    let expected = size.checked_mul(size)?.checked_mul(size)?;
+    if size < 2 || table.len() < expected {
+        return None;
+    }
+    table.truncate(expected);
+    Some(Lut3d { size, table })
+}
+
+fn with_lut(path: &str) -> Option<Lut3d> {
+    let mut slot = match LUT_CACHE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some((cached_path, lut)) = slot.as_ref() {
+        if cached_path == path {
+            return Some(lut.clone());
+        }
+    }
+    let loaded = load_cube(path)?;
+    *slot = Some((path.to_string(), loaded.clone()));
+    Some(loaded)
+}
+
+/// Apply a LUT, with trilinear interpolation between the eight surrounding
+/// samples.
+///
+/// Nearest-neighbour would be simpler and would band a gradient - and gradients
+/// are most of what a photograph is.
+fn apply_lut(image: &Array3<u8>, path: &str) -> Array3<u8> {
+    let lut = match with_lut(path) {
+        Some(lut) => lut,
+        None => return image.clone(),
+    };
+    let (h, w, _) = image.dim();
+    let last = lut.size - 1;
+    let scale = last as f32;
+    let mut out = Array3::<u8>::zeros((h, w, 3));
+
+    for y in 0..h {
+        for x in 0..w {
+            let rf = (image[[y, x, 0]] as f32 / 255.0 * scale).clamp(0.0, scale);
+            let gf = (image[[y, x, 1]] as f32 / 255.0 * scale).clamp(0.0, scale);
+            let bf = (image[[y, x, 2]] as f32 / 255.0 * scale).clamp(0.0, scale);
+            let r0 = rf.floor() as usize;
+            let g0 = gf.floor() as usize;
+            let b0 = bf.floor() as usize;
+            let r1 = (r0 + 1).min(last);
+            let g1 = (g0 + 1).min(last);
+            let b1 = (b0 + 1).min(last);
+            let fr = rf - r0 as f32;
+            let fg = gf - g0 as f32;
+            let fb = bf - b0 as f32;
+
+            for c in 0..3 {
+                let sample = |ri: usize, gi: usize, bi: usize| -> f32 {
+                    lut.table[(bi * lut.size + gi) * lut.size + ri][c]
+                };
+                let c00 = sample(r0, g0, b0) * (1.0 - fr) + sample(r1, g0, b0) * fr;
+                let c01 = sample(r0, g0, b1) * (1.0 - fr) + sample(r1, g0, b1) * fr;
+                let c10 = sample(r0, g1, b0) * (1.0 - fr) + sample(r1, g1, b0) * fr;
+                let c11 = sample(r0, g1, b1) * (1.0 - fr) + sample(r1, g1, b1) * fr;
+                let c0 = c00 * (1.0 - fg) + c10 * fg;
+                let c1 = c01 * (1.0 - fg) + c11 * fg;
+                let value = c0 * (1.0 - fb) + c1 * fb;
+                out[[y, x, c]] = (value * 255.0).clamp(0.0, 255.0) as u8;
+            }
         }
     }
     out
