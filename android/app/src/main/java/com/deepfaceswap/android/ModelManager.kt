@@ -232,6 +232,38 @@ class ModelManager(private val context: Context) {
      * once already. The size floor is deliberately loose: it is here to catch a
      * truncated file, not to police a model's size.
      */
+    /**
+     * What a job will ask the process to hold, in megabytes.
+     *
+     * Rough by necessity - ONNX Runtime's arena grows as it works - but the
+     * numbers that decide whether this fits are the model files themselves, and
+     * those are known exactly.
+     *
+     * The point is to fail BEFORE loading starts. A process killed part-way
+     * through loading 800 MB cannot report anything at all, and that is exactly
+     * what was happening: the job died in PREPARING with an empty error.
+     */
+    fun estimatedMemoryMb(
+        swapperFile: String,
+        restore: Boolean,
+        occlusion: Boolean,
+        visibility: Boolean,
+    ): Long {
+        var total = 0L
+        total += sizeOf(detectorPath)
+        total += sizeOf(recognizerPath)
+        total += sizeOf(landmarkPath)
+        total += sizeOf(swapperPath(swapperFile))
+        if (restore) total += sizeOf(enhancerPath)
+        if (occlusion) total += sizeOf(File(toolsDir, XSEG_FILE).absolutePath)
+        if (visibility) total += sizeOf(File(toolsDir, LANDMARK_MODEL_FILE).absolutePath)
+        // A working set on top of the weights: activations, the image, the arena.
+        return total + 160
+    }
+
+    private fun sizeOf(path: String): Long =
+        runCatching { File(path).length() / 1_048_576 }.getOrDefault(0L)
+
     private fun preferred(small: String, large: String, floorBytes: Long): String {
         val smallFile = File(buffaloDir, small)
         val largeFile = File(buffaloDir, large)
