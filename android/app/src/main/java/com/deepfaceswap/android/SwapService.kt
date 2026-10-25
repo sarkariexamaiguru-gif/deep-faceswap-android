@@ -68,6 +68,7 @@ class SwapService : Service() {
                 is SwapBus.Job.Image -> runImage(job)
             }
         } catch (t: Throwable) {
+            DebugLog.add("service", "${t.javaClass.simpleName}: ${t.message ?: "no message"}")
             SwapBus.update {
                 it.copy(running = false, stage = SwapBus.Stage.FAILED,
                     error = t.message ?: t.javaClass.simpleName)
@@ -115,13 +116,16 @@ class SwapService : Service() {
             },
         )
 
+        if (!result.ok) {
+            DebugLog.add("engine", result.error ?: "refused without saying why")
+        }
         SwapBus.update {
             it.copy(
                 running = false,
                 stage = if (result.ok) SwapBus.Stage.DONE else SwapBus.Stage.FAILED,
                 framesDone = if (result.ok) result.frames else it.framesDone,
                 resultPath = if (result.ok) job.outputPath else null,
-                error = result.error,
+                error = result.error ?: if (result.ok) null else "The engine refused.",
             )
         }
     }
@@ -137,29 +141,43 @@ class SwapService : Service() {
         notifyProgress()
         NativeBridge.setColorMatch(job.colorMatch)
 
-        val ok = if (job.animate) {
+        // The WHOLE result, not just `.ok`.
+        //
+        // This used to keep the boolean and discard the error beside it, then
+        // substitute a constant - so the one piece of information a failure
+        // produced was thrown away at the last step. Every "swap failed" this
+        // app has ever shown was that constant.
+        val result = if (job.animate) {
             NativeBridge.swapAnimation(
                 this, job.sourcePaths, job.targetPath, job.outputPath,
                 job.mappings, job.swapperFile, false, job.pixelBoost, job.enhancerStrength,
-            ).ok
+            )
         } else if (job.mappings.isNotEmpty()) {
             NativeBridge.swapMapped(
                 this, job.sourcePaths, job.targetPath, job.outputPath,
                 job.mappings, job.swapperFile, false, job.pixelBoost, job.enhancerStrength,
-            ).ok
+            )
         } else {
             NativeBridge.swap(
                 this, job.sourcePaths, job.targetPath, job.outputPath,
                 job.swapperFile, false, job.swapEveryFace, job.pixelBoost, job.enhancerStrength,
-            ).ok
+            )
+        }
+
+        if (!result.ok) {
+            DebugLog.add("engine", result.error ?: "refused without saying why")
         }
 
         SwapBus.update {
             it.copy(
                 running = false,
-                stage = if (ok) SwapBus.Stage.DONE else SwapBus.Stage.FAILED,
-                resultPath = if (ok) job.outputPath else null,
-                error = if (ok) null else "The swap could not be completed.",
+                stage = if (result.ok) SwapBus.Stage.DONE else SwapBus.Stage.FAILED,
+                resultPath = if (result.ok) job.outputPath else null,
+                error = if (result.ok) {
+                    null
+                } else {
+                    result.error ?: "The engine refused without saying why."
+                },
             )
         }
     }
