@@ -155,9 +155,10 @@
       "purpose": "Paint something out and fill it in",
       "runner": "inpaint",
       "models": [
+        "migan_litert",
         "migan",
-        "aotgan",
-        "lama_dilated"
+        "lama_dilated",
+        "aotgan"
       ],
       "params": [
         {
@@ -402,6 +403,7 @@
       "purpose": "Fill a hole you painted, from the surroundings",
       "runner": "inpaint",
       "models": [
+        "migan_litert",
         "migan",
         "lama_dilated",
         "aotgan"
@@ -425,8 +427,10 @@
       "purpose": "Erase text or a stamp and rebuild what was under it",
       "runner": "inpaint",
       "models": [
+        "migan_litert",
         "migan",
-        "lama_dilated"
+        "lama_dilated",
+        "aotgan"
       ],
       "ready": false
     },
@@ -438,9 +442,10 @@
       "purpose": "Detect and erase text, then fill it in",
       "runner": "inpaint",
       "models": [
+        "migan_litert",
         "migan",
         "lama_dilated",
-        "east_text"
+        "aotgan"
       ],
       "ready": false
     },
@@ -452,8 +457,10 @@
       "purpose": "Lift something out and drop it elsewhere",
       "runner": "inpaint",
       "models": [
+        "migan_litert",
         "migan",
-        "mobilesam"
+        "lama_dilated",
+        "aotgan"
       ],
       "ready": false
     },
@@ -547,9 +554,10 @@
       "purpose": "Cut out hair and fur without a hard edge",
       "runner": "segment",
       "models": [
+        "modnet_litert",
+        "mediapipe_selfie",
         "birefnet_lite_512",
-        "u2net",
-        "sinet"
+        "u2net"
       ],
       "ready": true
     },
@@ -561,8 +569,10 @@
       "purpose": "Depth-aware background blur",
       "runner": "segment",
       "models": [
-        "depth_anything_v2",
-        "mediapipe_selfie"
+        "modnet_litert",
+        "mediapipe_selfie",
+        "birefnet_lite_512",
+        "u2net"
       ],
       "ready": false
     },
@@ -574,6 +584,7 @@
       "purpose": "The plain cutout, no replacement",
       "runner": "segment",
       "models": [
+        "modnet_litert",
         "mediapipe_selfie",
         "birefnet_lite_512",
         "u2net"
@@ -601,8 +612,13 @@
       "purpose": "Repaint in a painterly style",
       "runner": "style",
       "models": [
+        "fns_candy",
+        "fns_mosaic",
+        "fns_rain",
+        "fns_udnie",
+        "animegan_v2",
         "fast_style",
-        "animegan_v2"
+        "whitebox_cartoon"
       ],
       "ready": false
     },
@@ -614,7 +630,13 @@
       "purpose": "Turn a photo into an anime frame",
       "runner": "style",
       "models": [
-        "animegan_v2"
+        "fns_candy",
+        "fns_mosaic",
+        "fns_rain",
+        "fns_udnie",
+        "animegan_v2",
+        "fast_style",
+        "whitebox_cartoon"
       ],
       "ready": false
     },
@@ -635,6 +657,12 @@
       "purpose": "Flat colour and clean outlines",
       "runner": "style",
       "models": [
+        "fns_candy",
+        "fns_mosaic",
+        "fns_rain",
+        "fns_udnie",
+        "animegan_v2",
+        "fast_style",
         "whitebox_cartoon"
       ],
       "ready": false
@@ -695,11 +723,12 @@
       "purpose": "Text to image, on the device",
       "runner": "generate",
       "models": [
-        "sana_600m",
+        "dreamlite",
+        "flux_klein_litert",
+        "instruct_pix2pix",
         "sd_turbo",
         "lcm_sd15",
-        "sd15",
-        "dreamlite"
+        "sana_600m"
       ],
       "ready": false
     },
@@ -711,13 +740,12 @@
       "purpose": "Describe a change and let a model make it",
       "runner": "generate",
       "models": [
-        "instruct_pix2pix",
         "dreamlite",
-        "blazeedit",
-        "qwen_image_edit_q2",
-        "qwen_image_edit",
+        "flux_klein_litert",
+        "instruct_pix2pix",
         "sd_turbo",
-        "lcm_sd15"
+        "lcm_sd15",
+        "sana_600m"
       ],
       "ready": false
     },
@@ -972,6 +1000,7 @@
       "purpose": "Lift a dark photo without blowing the highlights",
       "runner": "tone",
       "models": [
+        "cpga_litert",
         "zerodce"
       ],
       "ready": false
@@ -1182,12 +1211,13 @@
       "size_mb": 900,
       "licence": "CC BY-NC 4.0 - non-commercial, research only",
       "params": "0.39B",
-      "url": "",
+      "url": "https://huggingface.co/carlofkl/DreamLite-mobile",
       "file": "dreamlite",
       "runtime": "onnx",
       "measured": "~3 s for 1024x1024 on an iPhone 17 Pro, 4 steps",
-      "gated": true,
-      "note": "ByteDance, merged into diffusers. Gated behind an access request and non-commercial only. This is the model that would make the composer real rather than decorative."
+      "gated": false,
+      "note": "ByteDance, 0.39B, text-guided editing AND generation in one network. ~3 s for 1024x1024 on an iPhone 17 Pro, 4 steps, and the U-Net runs in ~0.42 s on a Snapdragon 8 Gen 3. Now ungated on HuggingFace in diffusers format. CC BY-NC 4.0. It is PyTorch, not ONNX, so this build cannot load it - but it is the model the text pipeline should be written against, because it is the best balance of quality, size and speed that exists for a phone.",
+      "unavailable": true
     },
     "real_esrgan_x2plus": {
       "name": "Real-ESRGAN x2plus",
@@ -1674,6 +1704,123 @@
       "runtime": "onnx",
       "measured": "Desktop GPU",
       "unavailable": true
+    },
+    "migan_litert": {
+      "name": "MI-GAN (LiteRT)",
+      "role": "Object removal, 6 ms",
+      "size_mb": 16,
+      "licence": "MIT",
+      "params": "5.95M",
+      "url": "https://huggingface.co/litert-community/MI-GAN-512-Places2-LiteRT/resolve/main/migan_fp16.tflite",
+      "file": "migan_fp16.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~6 ms at 512x512 on a Pixel 8a GPU; 26.6 ms p50 on a Galaxy S26",
+      "note": "The best inpainting model for a phone by a wide margin: 16.3 MB, 509 of 509 nodes on GPU, device-vs-PyTorch correlation 0.99998. Contract: in [1,4,512,512] = concat(mask-0.5, rgb*mask) with rgb in [-1,1] and mask 1=keep 0=erase; out [1,3,512,512] in [-1,1]. The runner now handles that single-tensor form. Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "modnet_litert": {
+      "name": "MODNet (LiteRT)",
+      "role": "Portrait matting, 79 ms",
+      "size_mb": 26,
+      "licence": "Apache-2.0",
+      "params": "6.5M",
+      "url": "https://huggingface.co/litert-community/MODNet-LiteRT/resolve/main/modnet.tflite",
+      "file": "modnet.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~79 ms per frame on a Pixel 8a GPU",
+      "note": "Trimap-free portrait matting - a soft alpha matte for a person with no green screen. in [1,3,512,512] normalised (x/255-0.5)/0.5, out [1,1,512,512] alpha in [0,1]. The right model for background blur and virtual backgrounds. Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "cpga_litert": {
+      "name": "CPGA-Net low light (LiteRT)",
+      "role": "Brighten a dark photo, 2 ms",
+      "size_mb": 1,
+      "licence": "MIT",
+      "params": "0.025M",
+      "url": "https://huggingface.co/litert-community/CPGA-Net-LowLight-LiteRT/resolve/main/cpga_fp16.tflite",
+      "file": "cpga_fp16.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~2 ms at 256x256 on a Pixel 8a GPU; 4.62 ms p50 on a Snapdragon NPU",
+      "note": "0.1 MB - the smallest model in the LiteRT zoo, and it works. in [1,3,256,256] RGB [0,1], out same. Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "fns_candy": {
+      "name": "Fast Neural Style - Candy",
+      "role": "Style transfer, 9 ms",
+      "size_mb": 4,
+      "licence": "BSD-3-Clause",
+      "params": "~1.6M",
+      "url": "https://huggingface.co/litert-community/Fast-Neural-Style-LiteRT/resolve/main/style_candy_fp16.tflite",
+      "file": "style_candy_fp16.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~9 ms at 256x256 on a Pixel 8a GPU",
+      "note": "One of four styles - candy, mosaic, rain_princess, udnie - each 3.5 MB. RGB 0-255 in and out, no normalisation. Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "fns_mosaic": {
+      "name": "Fast Neural Style - Mosaic",
+      "role": "Style transfer, 9 ms",
+      "size_mb": 4,
+      "licence": "BSD-3-Clause",
+      "params": "~1.6M",
+      "url": "https://huggingface.co/litert-community/Fast-Neural-Style-LiteRT/resolve/main/style_mosaic_fp16.tflite",
+      "file": "style_mosaic_fp16.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~9 ms at 256x256 on a Pixel 8a GPU",
+      "note": "Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "fns_rain": {
+      "name": "Fast Neural Style - Rain Princess",
+      "role": "Style transfer, 9 ms",
+      "size_mb": 4,
+      "licence": "BSD-3-Clause",
+      "params": "~1.6M",
+      "url": "https://huggingface.co/litert-community/Fast-Neural-Style-LiteRT/resolve/main/style_rain_princess_fp16.tflite",
+      "file": "style_rain_princess_fp16.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~9 ms at 256x256 on a Pixel 8a GPU",
+      "note": "Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "fns_udnie": {
+      "name": "Fast Neural Style - Udnie",
+      "role": "Style transfer, 9 ms",
+      "size_mb": 4,
+      "licence": "BSD-3-Clause",
+      "params": "~1.6M",
+      "url": "https://huggingface.co/litert-community/Fast-Neural-Style-LiteRT/resolve/main/style_udnie_fp16.tflite",
+      "file": "style_udnie_fp16.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~9 ms at 256x256 on a Pixel 8a GPU",
+      "note": "Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "flux_klein_litert": {
+      "name": "FLUX.2-klein 4B (LiteRT)",
+      "role": "Generation AND editing, on a phone GPU",
+      "size_mb": 4000,
+      "licence": "see upstream",
+      "params": "4B",
+      "url": "https://huggingface.co/litert-community/FLUX.2-klein-4B-LiteRT",
+      "file": "flux_klein.tflite",
+      "runtime": "litert",
+      "unavailable": true,
+      "measured": "~306 s per 256x256 generation, ~328-369 s per edit - verified on a Pixel 8a with no VRAM",
+      "note": "The one 4B model that does both generation and image editing entirely on a phone GPU. It works. It is not interactive: five minutes per image. If you want a text-driven edit on this device today and can wait, this is the only thing that does it without a server. Obtainable and verified on a phone GPU, but this build has no LiteRT runtime - only ONNX Runtime. Listed so it is on the map, and so the tool switches on the day a TFLite backend is added."
+    },
+    "clover_tiny": {
+      "name": "Clover-Image-Tiny",
+      "role": "Generation + inpaint, 0.3B",
+      "size_mb": 900,
+      "licence": "see upstream",
+      "params": "0.3B gen + 0.9B inpaint",
+      "url": "https://huggingface.co/neonforestmist/Clover-Image-Tiny",
+      "file": "clover_tiny.onnx",
+      "runtime": "coreml",
+      "unavailable": true,
+      "measured": "Core ML builds only",
+      "note": "Tiny generation plus a separate inpaint model, with LoRA support. Core ML builds are Apple-only, so it cannot run on Android at all."
     }
   }
 }

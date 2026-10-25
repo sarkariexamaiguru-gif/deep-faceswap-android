@@ -201,28 +201,51 @@ pub fn run(session: &mut Session, rgba: &Array3<u8>) -> Result<Array3<u8>> {
         }
     }
 
-    // Feed by declared order: the first input is the image, the second the mask.
-    // Taking the names from the session keeps this working across exports that
-    // call them "image"/"mask", "img"/"mask" or anything else.
+    // Two conventions exist, and the model decides which:
+    //
+    //   LaMa, AOT-GAN   two inputs  - image [1,3,512,512], mask [1,1,512,512]
+    //   MI-GAN          one input   - concat(mask-0.5, rgb*mask) [1,4,512,512]
+    //
+    // MI-GAN's single-tensor form is not an optimisation, it is the published
+    // contract: the mask is shifted by 0.5 and the colour is multiplied by it, so
+    // the network is told where the hole is and what surrounds it at once. Feeding
+    // it two tensors fails at the first run.
     let names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
-    if names.len() < 2 {
-        return Err(FaceSwapError::ProcessingError(format!(
-            "this model has {} input(s); inpainting needs an image and a mask",
-            names.len()
-        )));
-    }
     let out_name = session
         .outputs()
         .first()
         .map(|o| o.name().to_string())
         .ok_or_else(|| FaceSwapError::Ort("the model declares no outputs".to_string()))?;
 
-    let outputs = session
-        .run(inputs![
-            names[0].as_str() => TensorRef::from_array_view(image_arr.view())?,
-            names[1].as_str() => TensorRef::from_array_view(mask_arr.view())?,
-        ])
-        .map_err(|e| FaceSwapError::Ort(format!("inpaint run: {e}")))?;
+    let outputs = if names.len() >= 2 {
+        session
+            .run(inputs![
+                names[0].as_str() => TensorRef::from_array_view(image_arr.view())?,
+                names[1].as_str() => TensorRef::from_array_view(mask_arr.view())?,
+            ])
+            .map_err(|e| FaceSwapError::Ort(format!("inpaint run: {e}")))?
+    } else if names.len() == 1 {
+        // The concatenated form. Colour normalised to [-1,1], mask 1 = keep,
+        // 0 = erase - exactly as the MI-GAN model card specifies.
+        let mut packed = Array4::<f32>::zeros((1, 4, WORK, WORK));
+        for y in 0..WORK {
+            for x in 0..WORK {
+                let keep = if mask_work[[y, x, 0]] >= 128 { 1.0f32 } else { 0.0 };
+                for c3 in 0..3 {
+                    let rgb = img_work[[y, x, c3]] as f32 / 127.5 - 1.0;
+                    packed[[0, c3, y, x]] = rgb * keep;
+                }
+                packed[[0, 3, y, x]] = keep - 0.5;
+            }
+        }
+        session
+            .run(inputs![names[0].as_str() => TensorRef::from_array_view(packed.view())?])
+            .map_err(|e| FaceSwapError::Ort(format!("inpaint run: {e}")))?
+    } else {
+        return Err(FaceSwapError::ProcessingError(
+            "this model declares no inputs".to_string(),
+        ));
+    };
 
     let out = outputs[out_name.as_str()]
         .try_extract_array::<f32>()
@@ -236,13 +259,31 @@ pub fn run(session: &mut Session, rgba: &Array3<u8>) -> Result<Array3<u8>> {
     }
     let (oh, ow) = (shape[2], shape[3]);
 
+    // MI-GAN returns [-1,1]; LaMa returns [0,1]. A negative value is the tell,
+    // because only the signed convention can produce one. Detected once, not
+    // guessed per pixel.
+    let mut signed = false;
+    for y in 0..oh.min(8) {
+        for x in 0..ow.min(8) {
+            for c3 in 0..3 {
+                if out[[0, c3, y, x]] < -0.001 {
+                    signed = true;
+                }
+            }
+        }
+    }
+
     // Back to a square RGB image at the model's output size, then to the crop's.
     let mut filled = Array3::<u8>::zeros((oh, ow, 3));
     for y in 0..oh {
         for x in 0..ow {
             for c3 in 0..3 {
                 let v = out[[0, c3, y, x]];
-                filled[[y, x, c3]] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                filled[[y, x, c3]] = if signed {
+                    ((v + 1.0) * 127.5).clamp(0.0, 255.0).round() as u8
+                } else {
+                    (v.clamp(0.0, 1.0) * 255.0).round() as u8
+                };
             }
         }
     }
