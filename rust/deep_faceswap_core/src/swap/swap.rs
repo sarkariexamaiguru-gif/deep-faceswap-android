@@ -25,6 +25,7 @@ use crate::{log_additional, log_main};
 use ndarray::Array3;
 use ndarray::s;
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::fs::create_dir_all;
 use std::time::Instant;
 
