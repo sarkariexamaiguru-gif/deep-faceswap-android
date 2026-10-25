@@ -24,6 +24,23 @@ use ort::value::TensorRef;
 /// The size these models are trained at. LaMa, MI-GAN and AOT-GAN all use it.
 const WORK: usize = 512;
 
+/// Load an inpainting model.
+///
+/// Level 1, matching the runner that is known to load on this device. Level 3 was
+/// the setting that produced an ONNX Runtime internal abort with no message, and
+/// there is no reason for this module to repeat that experiment.
+pub fn load(model_path: &str) -> Result<Session> {
+    use ort::session::builder::GraphOptimizationLevel;
+    Session::builder()
+        .map_err(|e| FaceSwapError::Ort(format!("{e}")))?
+        .with_optimization_level(GraphOptimizationLevel::Level1)
+        .map_err(|e| FaceSwapError::Ort(format!("{e}")))?
+        .with_intra_threads(crate::config::intra_threads())
+        .map_err(|e| FaceSwapError::Ort(format!("{e}")))?
+        .commit_from_file(model_path)
+        .map_err(|e| FaceSwapError::Ort(format!("{e}")))
+}
+
 /// How much context around the hole to give the model, as a fraction of the hole.
 const CONTEXT: f32 = 0.35;
 
