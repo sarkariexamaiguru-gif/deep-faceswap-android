@@ -13,6 +13,7 @@ pub mod compositing;
 pub mod edit;
 pub mod health;
 pub mod image2image;
+pub mod inpaint;
 pub mod interpolate;
 pub mod landmarks;
 pub mod occlusion;
@@ -142,12 +143,40 @@ pub struct ToolSession {
 }
 
 impl ToolSession {
+    /// Run a tool that needs the alpha channel.
+    ///
+    /// Inpainting reads its mask from alpha - the pixels the user painted are
+    /// the pixels to fill. Every other tool ignores alpha and takes the colour
+    /// channels, so this is a superset of `run`, not a second interface.
+    pub fn run_rgba(&mut self, rgba: &Array3<u8>) -> Result<Array3<u8>> {
+        match self.tool_id.as_str() {
+            "inpaint" | "watermark" | "textremove" | "objectmove" => {
+                inpaint::run(&mut self.session, rgba)
+            }
+            _ => {
+                let (h, w, _) = rgba.dim();
+                let mut rgb = Array3::<u8>::zeros((h, w, 3));
+                for y in 0..h {
+                    for x in 0..w {
+                        for c in 0..3 {
+                            rgb[[y, x, c]] = rgba[[y, x, c]];
+                        }
+                    }
+                }
+                self.run(&rgb)
+            }
+        }
+    }
+
     /// Load the model a tool needs.
     pub fn load(tool_id: &str, model_path: &str) -> Result<Self> {
         let session = match tool_id {
             "upscale" => upscale::load(model_path)?,
-            "denoise" | "dejpeg" | "deblur" | "colourise" | "style" | "tone" | "inpaint" =>
+            "denoise" | "dejpeg" | "deblur" | "colourise" | "style" | "tone" =>
                 image2image::load(model_path)?,
+            // Inpainting takes two inputs, so it loads its own way.
+            "inpaint" | "watermark" | "textremove" | "objectmove" =>
+                inpaint::load(model_path)?,
             "cutout" | "segment" => segmentation::load(model_path)?,
             other => {
                 return Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}")))
@@ -174,7 +203,7 @@ impl ToolSession {
             // the de-blockers, the colouriser, the style transfer networks, the
             // deblurrers and the inpainting pipeline alike, so they need no code
             // of their own - only an entry in the tool registry naming this runner.
-            "denoise" | "dejpeg" | "deblur" | "colourise" | "style" | "tone" | "inpaint" =>
+            "denoise" | "dejpeg" | "deblur" | "colourise" | "style" | "tone" =>
                 image2image::run(&mut self.session, image),
             // Returns RGBA, not RGB: the mask becomes the alpha channel.
             "cutout" | "segment" => segmentation::matte(&mut self.session, image),

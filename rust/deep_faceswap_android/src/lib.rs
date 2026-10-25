@@ -870,13 +870,23 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_runToolNative(
             ));
         }
 
-        let mut image = Array3::<u8>::zeros((h, w, 3));
+        // Inpainting needs the mask, and the mask travels in alpha. Every other
+        // tool drops alpha here because a colour filter has no use for it.
+        let masked = matches!(
+            id.as_str(),
+            "inpaint" | "watermark" | "textremove" | "objectmove"
+        );
+        let channels_in = if masked { 4 } else { 3 };
+        let mut image = Array3::<u8>::zeros((h, w, channels_in));
         for y in 0..h {
             for x in 0..w {
                 let i = (y * w + x) * 4;
                 image[[y, x, 0]] = input[i];
                 image[[y, x, 1]] = input[i + 1];
                 image[[y, x, 2]] = input[i + 2];
+                if masked {
+                    image[[y, x, 3]] = input[i + 3];
+                }
             }
         }
 
@@ -895,7 +905,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_runToolNative(
         let held = guard
             .as_mut()
             .ok_or_else(|| "the tool failed to load".to_string())?;
-        let out = held.run(&image).map_err(|e| format!("{e}"))?;
+        let out = held.run_rgba(&image).map_err(|e| format!("{e}"))?;
 
         let (out_h, out_w, channels) = out.dim();
         let mut bytes = Vec::with_capacity(out_h * out_w * 4);
