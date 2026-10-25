@@ -684,6 +684,9 @@
       "purpose": "Text to image, on the device",
       "runner": "generate",
       "models": [
+        "sana_600m",
+        "sd_turbo",
+        "lcm_sd15",
         "sd15",
         "dreamlite"
       ],
@@ -694,11 +697,16 @@
       "name": "Edit with words",
       "category": "colour",
       "icon": "type",
-      "purpose": "Describe a change and let the model make it",
+      "purpose": "Describe a change and let a model make it",
       "runner": "generate",
       "models": [
         "instruct_pix2pix",
-        "dreamlite"
+        "dreamlite",
+        "blazeedit",
+        "qwen_image_edit_q2",
+        "qwen_image_edit",
+        "sd_turbo",
+        "lcm_sd15"
       ],
       "ready": false
     },
@@ -1317,6 +1325,81 @@
       "file": "sd15.onnx",
       "runtime": "onnx",
       "measured": "Minutes on CPU, seconds on an NPU"
+    },
+    "qwen_image_edit": {
+      "name": "Qwen-Image-Edit 2511",
+      "role": "Text-guided editing, state of the art",
+      "size_mb": 11500,
+      "licence": "Apache-2.0",
+      "params": "20B MMDiT + 7B Qwen2.5-VL = 27.1B",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF",
+      "file": "qwen-image-edit-q4_k.gguf",
+      "runtime": "gguf",
+      "measured": "~81 s per edit on an A100 80GB, 8 steps at 1024x1024",
+      "unavailable": true,
+      "note": "The best open text-editing model there is, and genuinely Apache-2.0. It needs a desktop GPU: 11.5 GB at Q4_K, 16-24 GB of VRAM, and even the Q2_K build is about 7 GB. Recorded so it is on the list, not because a phone can run it."
+    },
+    "qwen_image_edit_q2": {
+      "name": "Qwen-Image-Edit Q2_K",
+      "role": "Text-guided editing, smallest quant",
+      "size_mb": 7500,
+      "licence": "Apache-2.0",
+      "params": "27.1B total",
+      "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/qwen-image-edit-2509-Q2_K.gguf",
+      "file": "qwen-image-edit-q2_k.gguf",
+      "runtime": "gguf",
+      "measured": "Hours per image on a phone CPU",
+      "unavailable": true,
+      "note": "The smallest quantisation of the 20B editor. It would fit in a 12 GB phone's memory, and then take hours per image on a Snapdragon 778G. Not usable, but recorded honestly rather than omitted."
+    },
+    "qwen_image_edit_2509": {
+      "name": "Qwen-Image-Edit 2509",
+      "role": "Text-guided editing, later release",
+      "size_mb": 11500,
+      "licence": "Apache-2.0",
+      "params": "20B",
+      "url": "https://huggingface.co/Qwen/Qwen-Image-Edit-2509",
+      "file": "qwen-image-edit-2509.gguf",
+      "runtime": "gguf",
+      "measured": "Desktop GPU only",
+      "unavailable": true,
+      "note": "Adds precise bilingual text editing - change the words in an image while keeping the font and size. Desktop only."
+    },
+    "sd_turbo": {
+      "name": "SD-Turbo",
+      "role": "One-step generation and img2img",
+      "size_mb": 2400,
+      "licence": "CreativeML OpenRAIL-M+",
+      "params": "860M",
+      "url": "https://huggingface.co/stabilityai/sd-turbo",
+      "file": "sd_turbo.onnx",
+      "runtime": "onnx",
+      "measured": "1 step; ~10-40 s per image on a phone CPU",
+      "note": "One-step distilled SD1.5. img2img with a low strength is the cheapest way to get a text-driven edit on a phone that is not instruction-trained."
+    },
+    "lcm_sd15": {
+      "name": "LCM SD1.5",
+      "role": "4-step generation",
+      "size_mb": 2000,
+      "licence": "CreativeML OpenRAIL-M",
+      "params": "860M",
+      "url": "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5",
+      "file": "lcm_sd15.onnx",
+      "runtime": "onnx",
+      "measured": "4 steps; ~20-60 s per image on a phone CPU",
+      "note": "Latent Consistency distilled SD1.5. Fewer steps than base SD, similar quality."
+    },
+    "sana_600m": {
+      "name": "SANA-0.6B",
+      "role": "Fast generation, small",
+      "size_mb": 1200,
+      "licence": "Apache-2.0",
+      "params": "0.6B",
+      "url": "https://huggingface.co/Efficient-Large-Model/Sana_600M_512px_diffusers",
+      "file": "sana_600m.onnx",
+      "runtime": "onnx",
+      "measured": "Seconds on a desktop GPU; tens of seconds on a phone",
+      "note": "NVIDIA's efficient DiT. Same family Mobile-O uses as its decoder. The most phone-plausible text-to-image base."
     }
   }
 }
