@@ -6,6 +6,10 @@ plugins {
 }
 
 android {
+    buildFeatures {
+        buildConfig = true
+    }
+
     namespace = "com.deepfaceswap.android"
     compileSdk = 34
 
@@ -13,8 +17,8 @@ android {
         applicationId = "com.deepfaceswap.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 80
-        versionName = "2.8.0"
+        versionCode = 81
+        versionName = "2.9.0"
 
         // The `ort` crate ships a prebuilt ONNX Runtime only for 64-bit ARM
         // Android, so we target arm64-v8a exclusively.

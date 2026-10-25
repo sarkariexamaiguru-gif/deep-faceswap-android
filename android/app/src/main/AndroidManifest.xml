@@ -24,6 +24,7 @@
         android:required="false" />
 
     <application
+        android:name=".TasviApp"
         android:allowBackup="true"
         android:largeHeap="true"
         android:icon="@mipmap/ic_launcher"
@@ -84,6 +85,11 @@
             android:authorities="com.deepfaceswap.android.files"
             android:exported="false"
             android:grantUriPermissions="true" />
+        <activity
+            android:name=".CrashActivity"
+            android:exported="false"
+            android:label="Crash report"
+            android:excludeFromRecents="false" />
     </application>
 
 </manifest>
