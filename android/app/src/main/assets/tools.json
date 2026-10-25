@@ -118,6 +118,7 @@
       "purpose": "Recover a soft or motion-blurred shot",
       "runner": "deblur",
       "models": [
+        "nafnet_gopro_w32",
         "nafnet_deblur"
       ],
       "ready": false
@@ -218,6 +219,8 @@
       "purpose": "Tap or paint to mask one thing",
       "runner": "segment",
       "models": [
+        "edgesam_encoder",
+        "edgesam_decoder",
         "fastsam_s",
         "mobilesam"
       ],
@@ -317,7 +320,12 @@
       "icon": "person",
       "purpose": "Smooth tone, keep texture",
       "runner": "arithmetic",
-      "ready": false
+      "ready": false,
+      "models": [
+        "skin_contrast",
+        "skin_detail",
+        "bisenet_r18"
+      ]
     },
     {
       "id": "eyes",
@@ -656,7 +664,10 @@
       "icon": "warmth",
       "purpose": "Neutral greys, no cast",
       "runner": "arithmetic",
-      "ready": true
+      "ready": true,
+      "models": [
+        "deep_white_balance"
+      ]
     },
     {
       "id": "curves",
@@ -891,6 +902,7 @@
       "purpose": "Double the frame rate",
       "runner": "video",
       "models": [
+        "rife_lite",
         "rife_hdv3",
         "rife_v426"
       ],
@@ -950,6 +962,71 @@
       "icon": "video",
       "purpose": "Stitch stills into a clip",
       "runner": "video",
+      "ready": false
+    },
+    {
+      "id": "lowlight",
+      "name": "Low light",
+      "category": "enhance",
+      "icon": "warmth",
+      "purpose": "Lift a dark photo without blowing the highlights",
+      "runner": "tone",
+      "models": [
+        "zerodce"
+      ],
+      "ready": false
+    },
+    {
+      "id": "autoenhance",
+      "name": "Auto enhance",
+      "category": "colour",
+      "icon": "sparkle",
+      "purpose": "A model reads the photo and picks the eight corrections",
+      "runner": "arithmetic",
+      "models": [
+        "mobilevit_analyzer",
+        "hdrnet_fixer"
+      ],
+      "ready": false
+    },
+    {
+      "id": "degrain",
+      "name": "Remove film grain",
+      "category": "cleanup",
+      "icon": "sparkle",
+      "purpose": "Clean up a scanned or grainy frame",
+      "runner": "denoise",
+      "models": [
+        "film_degrainer",
+        "scunet"
+      ],
+      "ready": false
+    },
+    {
+      "id": "tryon",
+      "name": "Try on clothes",
+      "category": "people",
+      "icon": "person",
+      "purpose": "A garment onto the subject, keeping the face and body",
+      "runner": "segment",
+      "models": [
+        "catvton",
+        "idm_vton",
+        "ootdiffusion",
+        "stableviton"
+      ],
+      "ready": false
+    },
+    {
+      "id": "bodyparse",
+      "name": "Body regions",
+      "category": "people",
+      "icon": "scan",
+      "purpose": "Hair, face, arms, legs, upper and lower clothing",
+      "runner": "segment",
+      "models": [
+        "human_parse"
+      ],
       "ready": false
     }
   ],
@@ -1400,6 +1477,203 @@
       "runtime": "onnx",
       "measured": "Seconds on a desktop GPU; tens of seconds on a phone",
       "note": "NVIDIA's efficient DiT. Same family Mobile-O uses as its decoder. The most phone-plausible text-to-image base."
+    },
+    "nafnet_gopro_w32": {
+      "name": "NAFNet-GoPro width32",
+      "role": "Motion deblur",
+      "size_mb": 38,
+      "licence": "MIT",
+      "params": "~17M",
+      "url": "https://huggingface.co/litert-community/NAFNet-GoPro-width32-LiteRT/resolve/main/nafnet_fp16.tflite",
+      "file": "nafnet_gopro_w32.tflite",
+      "runtime": "tflite",
+      "measured": "~42 ms at 256x256 on a Pixel 8a GPU; 18.6 ms on a Snapdragon 8 Elite Gen 5 NPU",
+      "note": "Fully GPU-resident, 2179 of 2179 nodes. The fp16 overflow fix that makes it run is documented in the model card."
+    },
+    "edgesam_encoder": {
+      "name": "EdgeSAM encoder",
+      "role": "Embeddings for tap-to-select",
+      "size_mb": 128,
+      "licence": "Apache-2.0",
+      "params": "~10M",
+      "url": "https://github.com/PrathamX595/Kortex-AdobeSubmission/raw/main/app/src/main/assets/sam_encoder.onnx",
+      "file": "edgesam_encoder.onnx",
+      "runtime": "onnx",
+      "measured": "1-2 s per image, run once and cached"
+    },
+    "edgesam_decoder": {
+      "name": "EdgeSAM decoder",
+      "role": "Mask from a tap",
+      "size_mb": 20,
+      "licence": "Apache-2.0",
+      "params": "~4M",
+      "url": "https://github.com/PrathamX595/Kortex-AdobeSubmission/raw/main/app/src/main/assets/sam_decoder.onnx",
+      "file": "edgesam_decoder.onnx",
+      "runtime": "onnx",
+      "measured": "under 100 ms per tap"
+    },
+    "zerodce": {
+      "name": "Zero-DCE",
+      "role": "Low-light enhancement",
+      "size_mb": 2,
+      "licence": "MIT",
+      "params": "~0.08M",
+      "url": "https://github.com/PrathamX595/Kortex-AdobeSubmission/raw/main/app/src/main/assets/zerodce_iter8.onnx",
+      "file": "zerodce_iter8.onnx",
+      "runtime": "onnx",
+      "measured": "Real-time - under 80k parameters"
+    },
+    "mobilevit_analyzer": {
+      "name": "MobileViT analyzer",
+      "role": "Reads 8 edit parameters from a photo",
+      "size_mb": 12,
+      "licence": "MIT",
+      "params": "~5M",
+      "url": "https://github.com/PrathamX595/Kortex-AdobeSubmission/raw/main/app/src/main/assets/analyzer_8param_v2.onnx",
+      "file": "analyzer_8param_v2.onnx",
+      "runtime": "onnx",
+      "measured": "Milliseconds - 256x256 input",
+      "note": "Outputs exposure, contrast, saturation, brightness, highlights, shadows, temperature and sharpness, plus a four-class rationale. A better design than a fixed formula."
+    },
+    "hdrnet_fixer": {
+      "name": "HDRNet fixer",
+      "role": "Applies the 8 parameters",
+      "size_mb": 30,
+      "licence": "MIT",
+      "params": "~0.6M",
+      "url": "https://github.com/PrathamX595/Kortex-AdobeSubmission/raw/main/app/src/main/assets/hdrnet_fixer_safe.onnx",
+      "file": "hdrnet_fixer_safe.onnx",
+      "runtime": "onnx",
+      "measured": "Real-time - bilateral grid, 0.6M parameters"
+    },
+    "deep_white_balance": {
+      "name": "Deep White-Balance",
+      "role": "White balance by model",
+      "size_mb": 40,
+      "licence": "CC BY-NC-SA 4.0",
+      "params": "~1M",
+      "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/deepwb_net_awb.onnx",
+      "file": "deepwb_net_awb.onnx",
+      "runtime": "onnx",
+      "measured": "Instant"
+    },
+    "film_degrainer": {
+      "name": "Film Degrainer",
+      "role": "Remove film grain",
+      "size_mb": 12,
+      "licence": "CC0 1.0",
+      "params": "~1M",
+      "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1x-Film-Degrainer-1-000.onnx",
+      "file": "film_degrainer.onnx",
+      "runtime": "onnx",
+      "measured": "Instant"
+    },
+    "gaterv3_sharpen": {
+      "name": "1x Sharpen (gaterv3)",
+      "role": "Sharpening",
+      "size_mb": 9,
+      "licence": "CC BY 4.0",
+      "params": "~1M",
+      "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1xgaterv3_r_sharpen_fp32_op17_onnxslim.onnx",
+      "file": "gaterv3_sharpen.onnx",
+      "runtime": "onnx",
+      "measured": "Instant"
+    },
+    "skin_contrast": {
+      "name": "Skin Contrast",
+      "role": "Skin tone and texture",
+      "size_mb": 2,
+      "licence": "CC0 1.0",
+      "params": "tiny",
+      "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1xSkinContrast-SuperUltraCompact.onnx",
+      "file": "skin_contrast.onnx",
+      "runtime": "onnx",
+      "measured": "Instant - SuperUltraCompact"
+    },
+    "skin_detail": {
+      "name": "Skin Detail Lite",
+      "role": "Skin detail without smoothing",
+      "size_mb": 4,
+      "licence": "CC BY-NC-SA 4.0",
+      "params": "tiny",
+      "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/1x-ITF-SkinDiffDetail-Lite-v1.onnx",
+      "file": "skin_detail.onnx",
+      "runtime": "onnx",
+      "measured": "Instant"
+    },
+    "rife_lite": {
+      "name": "RIFE v4.25 lite",
+      "role": "Frame interpolation, small",
+      "size_mb": 8,
+      "licence": "MIT",
+      "params": "~2M",
+      "url": "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/rife_v4.25_lite_v2.onnx",
+      "file": "rife_lite.onnx",
+      "runtime": "onnx",
+      "measured": "Real-time"
+    },
+    "human_parse": {
+      "name": "Human parsing (SCHP/ATR)",
+      "role": "Whole-body regions",
+      "size_mb": 25,
+      "licence": "MIT",
+      "params": "~8M",
+      "url": "https://github.com/yisol/IDM-VTON/raw/main/ckpt/humanparsing/parsing_atr.onnx",
+      "file": "parsing_atr.onnx",
+      "runtime": "onnx",
+      "measured": "Real-time",
+      "note": "Ships with IDM-VTON and OOTDiffusion for try-on. Useful on its own: it segments hair, face, arms, legs, upper and lower clothing - which the face parsers cannot."
+    },
+    "catvton": {
+      "name": "CatVTON",
+      "role": "Virtual try-on",
+      "size_mb": 3500,
+      "licence": "CC BY-NC-SA 4.0",
+      "params": "899M total, 49.57M trainable",
+      "url": "https://github.com/Zheng-Chong/CatVTON",
+      "file": "catvton.onnx",
+      "runtime": "onnx",
+      "measured": "Under 8 GB VRAM at 1024x768 - a desktop GPU",
+      "unavailable": true,
+      "note": "The lightest try-on model there is. Still needs a desktop GPU, plus a person image, a garment image, a human parse and a DensePose map before it starts."
+    },
+    "ootdiffusion": {
+      "name": "OOTDiffusion",
+      "role": "Virtual try-on",
+      "size_mb": 4000,
+      "licence": "Other",
+      "params": "SD1.5-based",
+      "url": "https://github.com/levihsu/OOTDiffusion",
+      "file": "ootd.onnx",
+      "runtime": "onnx",
+      "measured": "Desktop GPU",
+      "unavailable": true,
+      "note": "Ships an ONNX human-parsing model, which we take separately. The try-on itself is not a phone feature."
+    },
+    "idm_vton": {
+      "name": "IDM-VTON",
+      "role": "Virtual try-on, best quality",
+      "size_mb": 7000,
+      "licence": "CC BY-NC-SA 4.0",
+      "params": "SDXL + IP-Adapter",
+      "url": "https://github.com/yisol/IDM-VTON",
+      "file": "idm_vton.onnx",
+      "runtime": "onnx",
+      "measured": "Desktop GPU",
+      "unavailable": true,
+      "note": "The quality benchmark of the family. Also ships ONNX parsing models."
+    },
+    "stableviton": {
+      "name": "StableVITON",
+      "role": "Virtual try-on",
+      "size_mb": 4000,
+      "licence": "CC BY-NC-SA 4.0",
+      "params": "SD1.5-based",
+      "url": "https://github.com/rlawjdghek/StableVITON",
+      "file": "stableviton.onnx",
+      "runtime": "onnx",
+      "measured": "Desktop GPU",
+      "unavailable": true
     }
   }
 }
