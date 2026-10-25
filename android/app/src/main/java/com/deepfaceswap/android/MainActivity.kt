@@ -1569,7 +1569,10 @@ class MainActivity : Activity() {
      * The debug log: what was asked for, what was chosen, and where it stopped.
      */
     private fun showDebugLog() {
-        val text = DebugLog.environment(this) + "\n\n" + DebugLog.dump()
+        // Not called `text`: inside the apply blocks below that name would
+        // shadow the TextView property and the assignment would target the
+        // wrong object - the same trap as the model rows.
+        val report = DebugLog.environment(this) + "\n\n" + DebugLog.dump()
         val sheet = Dialog(this)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1583,7 +1586,7 @@ class MainActivity : Activity() {
             setTextColor(Color.parseColor("#0E1424"))
         })
         box.addView(TextView(this).apply {
-            text = text
+            text = report
             textSize = 11f
             setTextColor(Color.parseColor("#4E5C7C"))
             typeface = android.graphics.Typeface.MONOSPACE
@@ -1593,21 +1596,30 @@ class MainActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
         ))
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actions.addView(button("Copy") {
+        fun action(label: String, onClick: () -> Unit) =
+            android.widget.Button(this).apply {
+                text = label
+                textSize = 12.5f
+                isAllCaps = false
+                setOnClickListener { onClick() }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dp(8) }
+            }
+        actions.addView(action("Copy") {
             val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(
-                android.content.ClipData.newPlainText("LabPic debug log", text),
+                android.content.ClipData.newPlainText("LabPic debug log", report),
             )
             toast("Copied")
         })
-        actions.addView(space(8))
-        actions.addView(button("Clear") {
+        actions.addView(action("Clear") {
             DebugLog.clear()
             sheet.dismiss()
             toast("Log cleared")
         })
-        actions.addView(space(8))
-        actions.addView(button("Close") { sheet.dismiss() })
+        actions.addView(action("Close") { sheet.dismiss() })
         box.addView(actions)
         sheet.setContentView(
             android.widget.ScrollView(this).apply { addView(box) },
