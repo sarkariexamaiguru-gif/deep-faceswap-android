@@ -2965,31 +2965,35 @@ class MainActivity : Activity() {
         val grid = qualityGrid()
         val label = modelOptions().firstOrNull { it.first == swapperFile }?.second ?: swapperFile
 
-        // What this job will ask the process to hold. The app was killed during
-        // PREPARING with 825 MB of models against a 384 MB ceiling, and a killed
-        // process cannot report anything - so the check has to happen here,
-        // before the loading starts, and the message has to be specific.
-        val needed = models.estimatedMemoryMb(
-            swapperFile,
-            restore = restoreOn,
-            occlusion = occlusionModelPath().isNotEmpty(),
-            visibility = landmarkModelPath().isNotEmpty(),
+        // Adapt the job to the device rather than refusing it.
+        //
+        // This used to work out that the models would not fit and stop, which
+        // left the app unusable on a phone whose ceiling is 512 MB. Now it works
+        // out what DOES fit, runs that, and says what it left out. A swap
+        // without the polish pass is worth more than no swap.
+        val plan = models.plan(
+            swapperFile = swapperFile,
+            wantsRestore = restoreOn,
+            wantsOcclusion = occlusionModelPath().isNotEmpty(),
+            wantsVisibility = landmarkModelPath().isNotEmpty(),
         )
-        val heap = Runtime.getRuntime().maxMemory() / 1_048_576
-        DebugLog.add("swap", "models need about ${needed} MB, heap ceiling ${heap} MB")
+        DebugLog.add(
+            "plan",
+            "needs ${plan.neededMb} MB of a ${plan.ceilingMb} MB ceiling" +
+                if (plan.adapted) " \u00b7 dropped ${plan.dropped.joinToString()}" else " \u00b7 all of it fits",
+        )
+        restoreOn = plan.restore
+        if (!plan.occlusion && occlusionModelPath().isNotEmpty()) {
+            // An empty path is how the native side is told to leave it off.
+            NativeBridge.setOcclusion("")
+        }
+        if (!plan.visibility && landmarkModelPath().isNotEmpty()) {
+            NativeBridge.setLandmarkModel("")
+        }
 
-        if (needed > heap - 96) {
-            val advice = buildString {
-                append("This job needs about ${needed} MB of models and this app's ceiling is ")
-                append("${heap} MB, so it would be killed while loading - which is what has been ")
-                append("happening.\n\n")
-                if (restoreOn) append("Turn off Restore Details to save about 324 MB.\n")
-                append("Downloading the small recogniser saves about 153 MB.\n")
-                append("Turning off occlusion saves about 67 MB.")
-            }
-            DebugLog.add("swap", "refused: ${needed} MB against ${heap} MB")
-            showSheet("Not enough memory", advice.split("\n").filter { it.isNotBlank() }, -1, null) { }
-            return
+        if (plan.adapted) {
+            swapStatus.text = "Running without ${plan.dropped.joinToString()} \u2014 " +
+                "they need ${plan.neededMb} MB and this device allows ${plan.ceilingMb} MB."
         }
 
         DebugLog.add("swap", "request: video=$video target=${target.name} sources=${sources.size}")

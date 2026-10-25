@@ -233,6 +233,73 @@ class ModelManager(private val context: Context) {
      * truncated file, not to police a model's size.
      */
     /**
+     * The largest configuration that fits.
+     *
+     * This is the difference between refusing and adapting. The app used to work
+     * out that a job would not fit and stop; now it works out what DOES fit and
+     * runs that, saying plainly what it left out and why.
+     *
+     * Ordered by what to give up first, and the order is not arbitrary. Restore
+     * Details is a 324 MB polish pass - the biggest item and the most optional.
+     * The occlusion mask is 67 MB and fixes something people notice. Visibility
+     * is 7 MB and only tightens a mask that is already there.
+     */
+    data class Plan(
+        val restore: Boolean,
+        val occlusion: Boolean,
+        val visibility: Boolean,
+        val swapper: String,
+        val neededMb: Long,
+        val ceilingMb: Long,
+        val dropped: List<String>,
+    ) {
+        val adapted: Boolean get() = dropped.isNotEmpty()
+    }
+
+    fun plan(
+        swapperFile: String,
+        wantsRestore: Boolean,
+        wantsOcclusion: Boolean,
+        wantsVisibility: Boolean,
+    ): Plan {
+        val ceiling = Runtime.getRuntime().maxMemory() / 1_048_576
+        // Headroom for the working set on top of the weights: activations, the
+        // image itself, and the arena ONNX Runtime grows as it runs.
+        val budget = ceiling - 64
+
+        var restore = wantsRestore
+        var occlusion = wantsOcclusion
+        var visibility = wantsVisibility
+        val swapper = swapperFile
+        val dropped = mutableListOf<String>()
+
+        fun needed() = estimatedMemoryMb(swapper, restore, occlusion, visibility)
+
+        if (needed() > budget && restore) {
+            restore = false
+            dropped.add("Restore Details (324 MB)")
+        }
+        if (needed() > budget && occlusion) {
+            occlusion = false
+            dropped.add("occlusion masking (67 MB)")
+        }
+        if (needed() > budget && visibility) {
+            visibility = false
+            dropped.add("landmark visibility (7 MB)")
+        }
+
+        return Plan(
+            restore = restore,
+            occlusion = occlusion,
+            visibility = visibility,
+            swapper = swapper,
+            neededMb = needed(),
+            ceilingMb = ceiling,
+            dropped = dropped,
+        )
+    }
+
+    /**
      * What a job will ask the process to hold, in megabytes.
      *
      * Rough by necessity - ONNX Runtime's arena grows as it works - but the
