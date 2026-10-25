@@ -132,6 +132,57 @@ pub fn swap_single_pair(
     )
 }
 
+/// Source embeddings, keyed by the face they came from.
+///
+/// A source embedding depends on the source face and on nothing else - not the
+/// frame, not the target. It was being recomputed on EVERY frame, which meant
+/// running a 166 MB recognition model 300 times over a video to get 300 copies
+/// of one number. That is the largest waste in the pipeline and it is invisible
+/// from the outside.
+///
+/// Keyed by file name and box so a different source face is a different entry,
+/// and cleared when a session opens so a changed source cannot be stale.
+static EMBEDDING_CACHE: Mutex<HashMap<String, Vec<f32>>> = Mutex::new(HashMap::new());
+
+/// Forget every cached embedding. Called when a session opens.
+pub fn clear_embedding_cache() {
+    match EMBEDDING_CACHE.lock() {
+        Ok(mut cache) => cache.clear(),
+        Err(poisoned) => poisoned.into_inner().clear(),
+    }
+}
+
+fn embedding_key(info: &SourceFaceInfo) -> String {
+    format!(
+        "{}:{:.0},{:.0},{:.0},{:.0}",
+        info.source_filename, info.face.bbox.x1, info.face.bbox.y1, info.face.bbox.x2,
+        info.face.bbox.y2
+    )
+}
+
+/// The embedding for one source face, computed once.
+fn source_embedding(
+    recognizer: &mut FaceRecognizer,
+    source_images: &[Array3<u8>],
+    info: &SourceFaceInfo,
+) -> Result<Vec<f32>> {
+    let key = embedding_key(info);
+    if let Ok(cache) = EMBEDDING_CACHE.lock() {
+        if let Some(hit) = cache.get(&key) {
+            return Ok(hit.clone());
+        }
+    }
+
+    let source_img = &source_images[info.source_image_index];
+    let source_aligned = alignment::align_face(source_img, &info.face, 112)?;
+    let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
+
+    if let Ok(mut cache) = EMBEDDING_CACHE.lock() {
+        cache.insert(key, embedding.clone());
+    }
+    Ok(embedding)
+}
+
 /// How many frames a lost face is carried forward before it is let go.
 ///
 /// Long enough to cover a turn, a blink or a hand passing across; short enough
@@ -434,10 +485,7 @@ pub fn swap_with_mappings(
             "Aligning source face",
             filename = &info.source_filename
         );
-        let source_img = &source_images[info.source_image_index];
-        let source_aligned = alignment::align_face(source_img, &info.face, 112)?;
-        let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
-        source_embeddings.push(embedding);
+        source_embeddings.push(source_embedding(recognizer, source_images, info)?);
     }
 
     // Swap each mapped face
@@ -845,10 +893,7 @@ pub fn swap_video(
                 "Aligning source face",
                 filename = &info.source_filename
             );
-            let source_img = &source_images[info.source_image_index];
-            let source_aligned = alignment::align_face(source_img, &info.face, 112)?;
-            let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
-            source_embeddings.push(embedding);
+            source_embeddings.push(source_embedding(recognizer, source_images, info)?);
         }
         log_main!(
             "extract_embeddings",
