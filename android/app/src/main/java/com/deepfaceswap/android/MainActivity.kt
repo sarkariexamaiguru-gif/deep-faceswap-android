@@ -666,6 +666,15 @@ class MainActivity : Activity() {
     }
 
     private fun renderNav() {
+        // The bottom bar is gone - navigation is the drawer now - and navRow is
+        // only ever assigned by buildBottomNav, which the shell no longer calls.
+        // show() still calls this on every screen change, so without this guard
+        // the very first show("home") in onCreate throws
+        // UninitializedPropertyAccessException and the app never opens at all.
+        //
+        // Guarded rather than deleted: a no-op that explains itself is better than
+        // removing a method that six call sites still reference.
+        if (!::navRow.isInitialized) return
         navRow.removeAllViews()
         listOf(
             // Four places, not seven. Swap and Video left the bar because they
