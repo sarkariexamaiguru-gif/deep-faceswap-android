@@ -139,7 +139,33 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- life
 
+    /**
+     * Record a fatal exception before the process dies.
+     *
+     * The app stopped opening and there is no device here to read a logcat from.
+     * Installing this FIRST, before anything else in onCreate, means even a crash
+     * during startup leaves a stack trace in the app's own folder - which the
+     * Debug log then shows on the next launch. A crash nobody can read is a crash
+     * nobody can fix.
+     */
+    private fun installCrashLog() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val writer = java.io.StringWriter()
+                error.printStackTrace(java.io.PrintWriter(writer))
+                val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                    .format(java.util.Date())
+                File(filesDir, "crash.txt").writeText(
+                    "Tasvi crashed at $stamp\n\n" + writer.toString(),
+                )
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        installCrashLog()
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         history = HistoryManager(this)
@@ -218,7 +244,13 @@ class MainActivity : Activity() {
         // The floating pill is gone. Navigation is a drawer reached from the
         // menu button, so the content is the full height of the screen and
         // nothing can hide underneath a bar that floats over it.
-        root.addView(buildDrawer())
+        // The drawer and the home are the two things built at startup. If either
+        // throws, the app used to die before it drew anything. Now a failure shows
+        // as a plain screen with the reason, which is recoverable and readable.
+        root.addView(runCatching { buildDrawer() }.getOrElse { error ->
+            DebugLog.add("shell", "drawer failed: ${error.javaClass.simpleName}: ${error.message}")
+            View(this)
+        })
         return root
     }
 
@@ -336,7 +368,7 @@ class MainActivity : Activity() {
         addView(FrameLayout(this@MainActivity).apply {
             background = getDrawable(R.drawable.bg_glass_circle)
             layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
-            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_flask, 19,
+            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_tasvi, 19,
                 R.color.surface_solid).apply {
                 layoutParams = FrameLayout.LayoutParams(dp(19), dp(19)).apply {
                     gravity = Gravity.CENTER
@@ -490,7 +522,7 @@ class MainActivity : Activity() {
         brand.addView(FrameLayout(this).apply {
             background = getDrawable(R.drawable.bg_glass_circle)
             layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
-            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_flask, 17,
+            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_tasvi, 17,
                 R.color.surface_solid).apply {
                 layoutParams = FrameLayout.LayoutParams(dp(17), dp(17)).apply {
                     gravity = Gravity.CENTER
@@ -1939,7 +1971,13 @@ class MainActivity : Activity() {
         // Not called `text`: inside the apply blocks below that name would
         // shadow the TextView property and the assignment would target the
         // wrong object - the same trap as the model rows.
-        val report = DebugLog.environment(this) + "\n\n" + DebugLog.dump()
+        val crash = File(filesDir, "crash.txt")
+        val crashBlock = if (crash.isFile) {
+            "\n\n--- LAST CRASH ---\n" + runCatching { crash.readText() }.getOrDefault("(unreadable)")
+        } else {
+            ""
+        }
+        val report = DebugLog.environment(this) + "\n\n" + DebugLog.dump() + crashBlock
         val sheet = Dialog(this)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

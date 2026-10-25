@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">LabPic</string>
-    <string name="tagline">A lab for pictures</string>
+    <string name="app_name">Tasvi</string>
+    <string name="tagline">An agent for pictures</string>
     <string name="private_label">Private</string>
 </resources>
