@@ -1566,6 +1566,19 @@ class MainActivity : Activity() {
     }
 
     /**
+     * Free and total RAM, in megabytes.
+     *
+     * The number that matters for model loading. The Java heap is a separate and
+     * much smaller budget, and planning against it was a mistake.
+     */
+    private fun deviceMemory(): Pair<Long, Long> = runCatching {
+        val manager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        (info.availMem / 1_048_576) to (info.totalMem / 1_048_576)
+    }.getOrDefault(0L to 0L)
+
+    /**
      * The debug log: what was asked for, what was chosen, and where it stopped.
      */
     private fun showDebugLog() {
@@ -2971,16 +2984,22 @@ class MainActivity : Activity() {
         // left the app unusable on a phone whose ceiling is 512 MB. Now it works
         // out what DOES fit, runs that, and says what it left out. A swap
         // without the polish pass is worth more than no swap.
+        val memory = deviceMemory()
         val plan = models.plan(
             swapperFile = swapperFile,
             wantsRestore = restoreOn,
             wantsOcclusion = occlusionModelPath().isNotEmpty(),
             wantsVisibility = landmarkModelPath().isNotEmpty(),
+            deviceFreeMb = memory.first,
+            deviceTotalMb = memory.second,
         )
         DebugLog.add(
             "plan",
-            "needs ${plan.neededMb} MB of a ${plan.ceilingMb} MB ceiling" +
-                if (plan.adapted) " \u00b7 dropped ${plan.dropped.joinToString()}" else " \u00b7 all of it fits",
+            "needs ${plan.neededMb} MB \u00b7 device ${memory.first} MB free of " +
+                "${memory.second} MB \u00b7 java ceiling " +
+                "${Runtime.getRuntime().maxMemory() / 1_048_576} MB" +
+                (if (plan.adapted) " \u00b7 dropped ${plan.dropped.joinToString()}"
+                 else " \u00b7 everything wanted fits"),
         )
         restoreOn = plan.restore
         if (!plan.occlusion && occlusionModelPath().isNotEmpty()) {

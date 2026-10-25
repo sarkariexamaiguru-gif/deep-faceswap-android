@@ -261,11 +261,22 @@ class ModelManager(private val context: Context) {
         wantsRestore: Boolean,
         wantsOcclusion: Boolean,
         wantsVisibility: Boolean,
+        deviceFreeMb: Long,
+        deviceTotalMb: Long,
     ): Plan {
-        val ceiling = Runtime.getRuntime().maxMemory() / 1_048_576
-        // Headroom for the working set on top of the weights: activations, the
-        // image itself, and the arena ONNX Runtime grows as it runs.
-        val budget = ceiling - 64
+        // Plan against the DEVICE, not the Java heap.
+        //
+        // This is the correction that matters. `Runtime.maxMemory()` is the Java
+        // heap; ONNX Runtime loads its models NATIVELY, outside it. Planning
+        // against the heap meant refusing jobs over a budget the models do not
+        // even live in - and dropping a 324 MB restorer to fit a number that was
+        // never the constraint.
+        //
+        // Three quarters of free RAM, deliberately: an app that takes all of it
+        // invites the low-memory killer, which would look exactly like the bug
+        // this project spent a day chasing.
+        val ceiling = if (deviceFreeMb > 0) (deviceFreeMb * 3) / 4 else deviceTotalMb / 2
+        val budget = ceiling
 
         var restore = wantsRestore
         var occlusion = wantsOcclusion
@@ -275,17 +286,19 @@ class ModelManager(private val context: Context) {
 
         fun needed() = estimatedMemoryMb(swapper, restore, occlusion, visibility)
 
-        if (needed() > budget && restore) {
-            restore = false
-            dropped.add("Restore Details (324 MB)")
+        // Last-resort-first: give up the 7 MB refinement before the 324 MB one,
+        // so a genuinely tight device loses the least it can.
+        if (needed() > budget && visibility) {
+            visibility = false
+            dropped.add("landmark visibility (7 MB)")
         }
         if (needed() > budget && occlusion) {
             occlusion = false
             dropped.add("occlusion masking (67 MB)")
         }
-        if (needed() > budget && visibility) {
-            visibility = false
-            dropped.add("landmark visibility (7 MB)")
+        if (needed() > budget && restore) {
+            restore = false
+            dropped.add("Restore Details (324 MB)")
         }
 
         return Plan(
