@@ -31,7 +31,7 @@ const SIZE: usize = 256;
 pub fn load(model_path: &str) -> Result<Session> {
     Session::builder()
         .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
-        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .with_optimization_level(GraphOptimizationLevel::Level1)
         .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
         .with_intra_threads(config::intra_threads())
         .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?

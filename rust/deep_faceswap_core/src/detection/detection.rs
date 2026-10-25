@@ -74,7 +74,7 @@ impl FaceDetector {
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_execution_providers([CUDAExecutionProvider::default().build()])
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .with_optimization_level(GraphOptimizationLevel::Level1)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_intra_threads(crate::config::intra_threads())
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
@@ -86,7 +86,7 @@ impl FaceDetector {
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_log_level(ort_log_level)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .with_optimization_level(GraphOptimizationLevel::Level1)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_intra_threads(crate::config::intra_threads())
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
