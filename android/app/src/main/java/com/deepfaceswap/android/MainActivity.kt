@@ -1252,29 +1252,178 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------ tools screen
 
+    /**
+     * Screen H - the Tools catalogue.
+     *
+     * Rendered from ToolRegistry rather than from code. Every row comes from
+     * assets/tools.json, so adding a tool means writing an entry. A
+     * tools-extra.json dropped into the app's own files directory adds a tool to
+     * an INSTALLED build without rebuilding it.
+     *
+     * The status tag is the important part. A tool whose model is not on the
+     * device says so and offers the download, instead of appearing identical to
+     * a working tool and doing nothing when tapped - which is how a third of the
+     * old grid behaved.
+     */
     private fun buildToolsScreen(): View {
         val col = pageColumn()
+        val registry = ToolRegistry.get(this)
+        val installedIds = installedModelIds(registry)
+
         col.addView(RoopUi.screenTitle(this, "Tools"))
-        col.addView(RoopUi.body(this, "Extras that work on this device.").apply {
+        col.addView(RoopUi.body(this, "${registry.tools.size} tools \u00b7 catalogue: ${registry.source}")
+            .apply {
+                layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 14)
+            })
+
+        registry.byCategory().forEach { (category, tools) ->
+            col.addView(TextView(this).apply {
+                text = category.name.uppercase()
+                textSize = 12f
+                setTextColor(getColor(R.color.ink_muted))
+                setTypeface(typeface, Typeface.BOLD)
+                letterSpacing = 0.06f
+                layoutParams = RoopUi.margin(this@MainActivity,
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    0, 20, 0, 6)
+            })
+            tools.forEach { tool ->
+                col.addView(registryRow(tool, ToolRegistry.status(registry, tool, installedIds)))
+            }
+        }
+
+        col.addView(RoopUi.meta(this,
+            "To add a tool, put a tools-extra.json in this app's files folder.").apply {
             layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0, 18)
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 24, 0, 12)
         })
-        col.addView(toolCard(R.drawable.ic_hd, "Edit a photo",
-            "Crop, rotate, light, colour — instant, no models") {
-            startActivity(Intent(this@MainActivity, EditActivity::class.java))
-        })
-        col.addView(toolCard(R.drawable.ic_person, "Face Mapping",
-            "Choose which face goes where") {
-            faceMode = 2
-            show("swap")
-        })
-        col.addView(toolCard(R.drawable.ic_cube, "Model Diagnostics",
-            "What is installed, its size and licence") { showModelDiagnostics() })
-        col.addView(toolCard(R.drawable.ic_folder, "Storage & Cache",
-            "Models, history and temporary files") { show("settings") })
-        col.addView(toolCard(R.drawable.ic_info, "Help & Guide",
-            "Source vs target, formats, limits") { showHelp() })
-        return scrollPage(col)
+        return col
+    }
+
+    /** Which registry models are actually on this device. */
+    private fun installedModelIds(registry: ToolRegistry.Registry): Set<String> = runCatching {
+        val files = models.models().filter { it.installed }.map { it.fileName }.toSet()
+        registry.models.values.filter { it.file in files }.map { it.id }.toSet()
+    }.getOrDefault(emptySet())
+
+    /** One tool, with an honest status and the right action for that status. */
+    private fun registryRow(tool: ToolRegistry.Tool, status: ToolRegistry.Status): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            contentDescription = tool.name
+            setPadding(dp(2), dp(12), dp(2), dp(12))
+            addView(FrameLayout(this@MainActivity).apply {
+                background = getDrawable(
+                    if (status == ToolRegistry.Status.READY) R.drawable.bg_chip_soft
+                    else R.drawable.bg_glass_circle
+                )
+                layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
+                addView(RoopUi.iconView(this@MainActivity, iconForTool(tool.icon), 20,
+                    if (status == ToolRegistry.Status.READY) R.color.blue else R.color.ink_muted).apply {
+                    layoutParams = FrameLayout.LayoutParams(dp(20), dp(20)).apply {
+                        gravity = Gravity.CENTER
+                    }
+                })
+            })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(13)
+                }
+                addView(TextView(this@MainActivity).apply {
+                    text = tool.name
+                    textSize = 15f
+                    setTextColor(getColor(R.color.ink))
+                    setTypeface(typeface, Typeface.BOLD)
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = tool.purpose
+                    textSize = 12.5f
+                    setTextColor(getColor(R.color.ink_muted))
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = ToolRegistry.label(status)
+                textSize = 11.5f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(
+                    when (status) {
+                        ToolRegistry.Status.READY -> getColor(R.color.success)
+                        ToolRegistry.Status.NEEDS_MODEL -> getColor(R.color.warning)
+                        ToolRegistry.Status.NOT_BUILT -> getColor(R.color.ink_muted)
+                    },
+                )
+                background = getDrawable(R.drawable.bg_chip_soft)
+                setPadding(dp(9), dp(4), dp(9), dp(4))
+            })
+            setOnClickListener {
+                when (status) {
+                    ToolRegistry.Status.READY -> openTool(tool)
+                    ToolRegistry.Status.NEEDS_MODEL -> {
+                        toast("${tool.name} needs a model first")
+                        show("models")
+                    }
+                    ToolRegistry.Status.NOT_BUILT -> showSheet(
+                        tool.name,
+                        listOf(
+                            tool.purpose,
+                            "This one has no downloadable model yet.",
+                            "It will appear here the day one is published.",
+                        ),
+                        -1, null,
+                    ) { }
+                }
+            }
+        }
+
+    /** Open a tool: a dedicated screen if it names one, otherwise the generic runner. */
+    private fun openTool(tool: ToolRegistry.Tool) {
+        when (tool.screen) {
+            "EditActivity" -> startActivity(Intent(this, EditActivity::class.java))
+            "UpscaleActivity" -> startActivity(Intent(this, UpscaleActivity::class.java))
+            null -> {
+                if (tool.id == "faceswap") { show("swap"); return }
+                if (tool.id == "videoswap") { show("video"); return }
+                startActivity(Intent(this, ToolActivity::class.java).apply {
+                    putExtra("toolId", tool.id)
+                    putExtra("toolName", tool.name)
+                    putExtra("toolRunner", tool.runner)
+                })
+            }
+            else -> toast("${tool.name} opens in its own screen")
+        }
+    }
+
+    /** Registry icon names to the drawables that exist. */
+    private fun iconForTool(name: String): Int = when (name) {
+        "hd" -> R.drawable.ic_hd
+        "sparkle" -> R.drawable.ic_sparkle
+        "grid2" -> R.drawable.ic_chip
+        "wave" -> R.drawable.ic_filter
+        "star" -> R.drawable.ic_star
+        "erase" -> R.drawable.ic_trash
+        "palette" -> R.drawable.ic_palette
+        "scissors" -> R.drawable.ic_person
+        "image" -> R.drawable.ic_image
+        "scan" -> R.drawable.ic_scan
+        "chip" -> R.drawable.ic_chip
+        "shield" -> R.drawable.ic_shield
+        "filter" -> R.drawable.ic_filter
+        "warmth" -> R.drawable.ic_sparkle
+        "crop" -> R.drawable.ic_sort
+        "cube" -> R.drawable.ic_cube
+        "sort" -> R.drawable.ic_sort
+        "sliders" -> R.drawable.ic_sliders
+        "person" -> R.drawable.ic_person
+        "swap" -> R.drawable.ic_swap
+        "video" -> R.drawable.ic_video
+        "gif" -> R.drawable.ic_gif
+        else -> R.drawable.ic_cube
     }
 
     /**

@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "note": "Every tool in Tasvi is defined here, not in code. Add an entry and the tool appears in the app. If it names a model, the app offers to download that model first; if the model is not installed the tool shows as 'Needs a model' rather than failing when tapped.",
+  "runners": ["arithmetic", "upscale", "denoise", "dejpeg", "segment", "inpaint", "colourise", "deblur", "face_swap", "video", "gif", "relight", "outpaint", "tone"],
+
+  "categories": [
+    { "id": "enhance",  "name": "Enhance and restore", "icon": "hd" },
+    { "id": "cleanup",  "name": "Cleanup",             "icon": "sparkle" },
+    { "id": "cutout",   "name": "Cutout and background","icon": "scissors" },
+    { "id": "colour",   "name": "Colour and style",    "icon": "palette" },
+    { "id": "transform","name": "Transform",           "icon": "crop" },
+    { "id": "people",   "name": "People",              "icon": "person" },
+    { "id": "video",    "name": "Video and GIF",       "icon": "video" }
+  ],
+
+  "tools": [
+    { "id": "edit",       "name": "Edit a photo",   "category": "transform", "icon": "sliders",
+      "purpose": "Crop, light, colour, sharpen", "runner": "arithmetic", "screen": "EditActivity", "ready": true },
+
+    { "id": "upscale",    "name": "Upscale",        "category": "enhance", "icon": "hd",
+      "purpose": "Make an image larger without softening it",
+      "runner": "upscale", "models": ["real_esrgan_x4plus", "span_kendata_x4", "swin2sr_x4", "realesr_general_x4v3", "quicksrnet_m", "esrgan"], "ready": true },
+
+    { "id": "denoise",    "name": "Denoise",        "category": "enhance", "icon": "sparkle",
+      "purpose": "Remove grain and phone noise",
+      "runner": "denoise", "models": ["scunet", "nafnet_denoise", "realplksr_denoise", "dncnn"], "ready": true },
+
+    { "id": "dejpeg",     "name": "De-JPEG",        "category": "enhance", "icon": "grid2",
+      "purpose": "Erase blocking from compressed images",
+      "runner": "dejpeg", "models": ["omnisr_dejpeg", "realplksr_dejpeg"], "ready": true },
+
+    { "id": "deblur",     "name": "Remove blur",    "category": "enhance", "icon": "wave",
+      "purpose": "Recover a soft or motion-blurred shot",
+      "runner": "deblur", "models": ["nafnet_deblur"], "ready": false },
+
+    { "id": "sharpen",    "name": "Sharpen",        "category": "enhance", "icon": "star",
+      "purpose": "Crisper edges, colour untouched", "runner": "arithmetic", "ready": false },
+
+    { "id": "restore",    "name": "Restore",        "category": "enhance", "icon": "star",
+      "purpose": "Repair an old or degraded photograph",
+      "runner": "upscale", "models": ["gpen_bfr_256", "gfpgan_14", "codeformer", "restoreformer_pp"], "ready": false },
+
+    { "id": "erase",      "name": "Erase object",   "category": "cleanup", "icon": "erase",
+      "purpose": "Paint something out and fill it in",
+      "runner": "inpaint", "models": ["migan", "aotgan", "lama_dilated"],
+      "params": [{ "key": "brush", "type": "slider", "min": 8, "max": 160, "default": 40 }], "ready": false },
+
+    { "id": "colourise",  "name": "Colourise",      "category": "colour", "icon": "palette",
+      "purpose": "Bring a black-and-white photo to colour",
+      "runner": "colourise", "models": ["ddcolor_tiny", "ddcolor"], "ready": false },
+
+    { "id": "cutout",     "name": "Cut out",        "category": "cutout", "icon": "scissors",
+      "purpose": "Drop the background, keep the subject",
+      "runner": "segment", "models": ["birefnet_lite_512", "mediapipe_selfie", "u2net", "mobilesam"], "ready": true },
+
+    { "id": "swapbg",     "name": "Swap background","category": "cutout", "icon": "image",
+      "purpose": "Put the subject somewhere else",
+      "runner": "segment", "models": ["birefnet_lite_512", "mediapipe_selfie"], "ready": false },
+
+    { "id": "select",     "name": "Select region",  "category": "cutout", "icon": "scan",
+      "purpose": "Tap or paint to mask one thing",
+      "runner": "segment", "models": ["fastsam_s", "mobilesam"], "ready": false },
+
+    { "id": "autocolour", "name": "Auto colour",    "category": "colour", "icon": "chip",
+      "purpose": "Fix a cast, lift a dull shot", "runner": "arithmetic", "ready": false },
+
+    { "id": "colourmatch","name": "Colour match",   "category": "colour", "icon": "shield",
+      "purpose": "Blend a face into its frame", "runner": "arithmetic", "ready": true },
+
+    { "id": "filters",    "name": "Filters",        "category": "colour", "icon": "filter",
+      "purpose": "Thirteen one-tap looks", "runner": "arithmetic", "ready": true },
+
+    { "id": "relight",    "name": "Relight",        "category": "colour", "icon": "warmth",
+      "purpose": "Fix harsh shadows on a portrait",
+      "runner": "relight", "models": ["blazeedit"], "ready": false },
+
+    { "id": "crop",       "name": "Crop and rotate","category": "transform", "icon": "crop",
+      "purpose": "Frame it, level it", "runner": "arithmetic", "ready": true },
+
+    { "id": "resize",     "name": "Resize",         "category": "transform", "icon": "cube",
+      "purpose": "Exact pixel dimensions", "runner": "arithmetic", "ready": true },
+
+    { "id": "straighten", "name": "Straighten",     "category": "transform", "icon": "sort",
+      "purpose": "Level a tilted horizon", "runner": "arithmetic", "ready": true },
+
+    { "id": "outpaint",   "name": "Extend",         "category": "transform", "icon": "grid2",
+      "purpose": "Grow the frame — portrait to landscape",
+      "runner": "outpaint", "models": ["blazeedit"], "ready": false },
+
+    { "id": "reshape",    "name": "Reshape",        "category": "people", "icon": "sliders",
+      "purpose": "Jaw, nose, waist, height", "runner": "arithmetic", "ready": false },
+
+    { "id": "skin",       "name": "Skin",           "category": "people", "icon": "person",
+      "purpose": "Smooth tone, keep texture", "runner": "arithmetic", "ready": false },
+
+    { "id": "eyes",       "name": "Eyes",           "category": "people", "icon": "scan",
+      "purpose": "Brighten and sharpen", "runner": "arithmetic", "ready": false },
+
+    { "id": "teeth",      "name": "Teeth",          "category": "people", "icon": "star",
+      "purpose": "Whiten, without going blue", "runner": "arithmetic", "ready": false },
+
+    { "id": "faceswap",   "name": "Face swap",      "category": "people", "icon": "swap",
+      "purpose": "One face onto another",
+      "runner": "face_swap", "models": ["inswapper_128", "simswap_256", "ghost_2", "hififace", "facedancer"], "ready": true },
+
+    { "id": "videoswap",  "name": "Swap a video",   "category": "video", "icon": "video",
+      "purpose": "Frame by frame, audio kept",
+      "runner": "video", "models": ["inswapper_128"], "ready": true },
+
+    { "id": "videoupscale","name": "Video upscale","category": "video", "icon": "hd",
+      "purpose": "Upscale a whole clip",
+      "runner": "video", "models": ["real_esrgan_x4plus"], "ready": false },
+
+    { "id": "gif",        "name": "GIF maker",      "category": "video", "icon": "gif",
+      "purpose": "Turn frames into an animation", "runner": "gif", "ready": false }
+  ],
+
+  "models": {
+    "migan":            { "name": "MI-GAN", "role": "Object removal", "size_mb": 12, "licence": "MIT",
+      "params": "5.95M", "url": "https://huggingface.co/CardAnvilModels/MI-GAN-ONNX/resolve/main/migan_pipeline_v2.onnx",
+      "file": "migan_pipeline_v2.onnx", "runtime": "onnx", "measured": "296 ms on an iPhone 14 Pro Max (CPU)" },
+
+    "ddcolor_tiny":     { "name": "DDColor tiny", "role": "Colourisation", "size_mb": 55, "licence": "Apache-2.0",
+      "params": "56.3M", "url": "https://huggingface.co/lensmera/lensmera-color-ddcolor/resolve/main/ddcolor-fp16.onnx",
+      "file": "ddcolor-fp16.onnx", "runtime": "onnx", "measured": "28-83 ms on a Snapdragon NPU" },
+
+    "aotgan":           { "name": "AOT-GAN", "role": "Inpainting", "size_mb": 58, "licence": "MIT",
+      "params": "15.2M", "url": "https://huggingface.co/qualcomm/AOT-GAN/resolve/main/AOT-GAN.onnx",
+      "file": "aotgan.onnx", "runtime": "onnx", "measured": "On-device, Qualcomm profiled" },
+
+    "lama_dilated":     { "name": "LaMa-Dilated", "role": "Inpainting", "size_mb": 200, "licence": "Apache-2.0",
+      "params": "~27M", "url": "https://huggingface.co/qualcomm/LaMa-Dilated/resolve/main/LaMa-Dilated.onnx",
+      "file": "lama_dilated.onnx", "runtime": "onnx", "measured": "On-device, Qualcomm profiled" },
+
+    "nafnet_deblur":    { "name": "NAFNet-DeBlur", "role": "Deblur", "size_mb": 120, "licence": "MIT",
+      "params": "~17M", "url": "https://huggingface.co/qualcomm/NAFNet-DeBlur/resolve/main/NAFNet-DeBlur.onnx",
+      "file": "nafnet_deblur.onnx", "runtime": "onnx", "measured": "On-device, Qualcomm profiled" },
+
+    "nafnet_denoise":   { "name": "NAFNet-DeNoise", "role": "Denoise", "size_mb": 120, "licence": "MIT",
+      "params": "~17M", "url": "https://huggingface.co/qualcomm/NAFNet-DeNoise/resolve/main/NAFNet-DeNoise.onnx",
+      "file": "nafnet_denoise.onnx", "runtime": "onnx", "measured": "On-device, Qualcomm profiled" },
+
+    "dncnn":            { "name": "DnCNN", "role": "Denoise", "size_mb": 2, "licence": "MIT",
+      "params": "~0.5M", "url": "https://huggingface.co/qualcomm/DnCNN/resolve/main/DnCNN.onnx",
+      "file": "dncnn.onnx", "runtime": "onnx", "measured": "Instant" },
+
+    "esrgan":           { "name": "ESRGAN", "role": "Upscale 4x", "size_mb": 64, "licence": "BSD-3-Clause",
+      "params": "16.7M", "url": "https://huggingface.co/qualcomm/ESRGAN/resolve/main/ESRGAN.onnx",
+      "file": "esrgan.onnx", "runtime": "onnx", "measured": "27-114 ms on a Snapdragon NPU" },
+
+    "quicksrnet_m":     { "name": "QuickSRNet Medium", "role": "Upscale", "size_mb": 4, "licence": "BSD-3-Clause",
+      "params": "tiny", "url": "https://huggingface.co/qualcomm/QuickSRNetMedium/resolve/main/QuickSRNetMedium.onnx",
+      "file": "quicksrnet_m.onnx", "runtime": "onnx", "measured": "Real-time" },
+
+    "mediapipe_selfie": { "name": "MediaPipe Selfie", "role": "Person vs background", "size_mb": 1, "licence": "Apache-2.0",
+      "params": "tiny", "url": "https://huggingface.co/qualcomm/MediaPipe-Selfie-Segmentation/resolve/main/MediaPipe-Selfie-Segmentation.onnx",
+      "file": "mediapipe_selfie.onnx", "runtime": "onnx", "measured": "Real-time" },
+
+    "u2net":            { "name": "U2-Net", "role": "Salient object", "size_mb": 176, "licence": "Apache-2.0",
+      "params": "44M", "url": "https://huggingface.co/qualcomm/U2Net-Segmentation/resolve/main/U2Net-Segmentation.onnx",
+      "file": "u2net.onnx", "runtime": "onnx", "measured": "On-device, Qualcomm profiled" },
+
+    "fastsam_s":        { "name": "FastSAM-S", "role": "Promptable mask", "size_mb": 23, "licence": "AGPL-3.0",
+      "params": "~11M", "url": "https://huggingface.co/qualcomm/FastSam-S/resolve/main/FastSam-S.onnx",
+      "file": "fastsam_s.onnx", "runtime": "onnx", "measured": "Real-time" },
+
+    "blazeedit":        { "name": "BlazeEdit", "role": "Object removal, relight, tone, outpaint",
+      "size_mb": 400, "licence": "Research - weights not released", "params": "195M",
+      "url": "", "file": "blazeedit.onnx", "runtime": "onnx",
+      "measured": "290 ms on a Pixel 10, Edge TPU", "unavailable": true,
+      "note": "Google, 195M, mask-driven rather than text-driven, which is exactly this app's shape. Weights are not published yet; tracked here so the tool can switch on the day they are." },
+
+    "dreamlite":        { "name": "DreamLite mobile", "role": "Text-guided editing and generation",
+      "size_mb": 900, "licence": "CC BY-NC 4.0 - non-commercial, research only", "params": "0.39B",
+      "url": "", "file": "dreamlite", "runtime": "onnx",
+      "measured": "~3 s for 1024x1024 on an iPhone 17 Pro, 4 steps", "gated": true,
+      "note": "ByteDance, merged into diffusers. Gated behind an access request and non-commercial only. This is the model that would make the composer real rather than decorative." }
+  }
+}
