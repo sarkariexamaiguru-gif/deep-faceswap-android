@@ -146,8 +146,9 @@ impl ToolSession {
     pub fn load(tool_id: &str, model_path: &str) -> Result<Self> {
         let session = match tool_id {
             "upscale" => upscale::load(model_path)?,
-            "denoise" | "dejpeg" => image2image::load(model_path)?,
-            "cutout" => segmentation::load(model_path)?,
+            "denoise" | "dejpeg" | "deblur" | "colourise" | "style" | "tone" | "inpaint" =>
+                image2image::load(model_path)?,
+            "cutout" | "segment" => segmentation::load(model_path)?,
             other => {
                 return Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}")))
             }
@@ -167,9 +168,16 @@ impl ToolSession {
         match self.tool_id.as_str() {
             "upscale" => upscale::run(&mut self.session, image),
             // One runner, because these differ only in which weights they loaded.
-            "denoise" | "dejpeg" => image2image::run(&mut self.session, image),
+            //
+            // Every model below is a 1-in-1-out image filter: a picture goes in, a
+            // picture of the same size comes out. That is true of the denoisers,
+            // the de-blockers, the colouriser, the style transfer networks, the
+            // deblurrers and the inpainting pipeline alike, so they need no code
+            // of their own - only an entry in the tool registry naming this runner.
+            "denoise" | "dejpeg" | "deblur" | "colourise" | "style" | "tone" | "inpaint" =>
+                image2image::run(&mut self.session, image),
             // Returns RGBA, not RGB: the mask becomes the alpha channel.
-            "cutout" => segmentation::matte(&mut self.session, image),
+            "cutout" | "segment" => segmentation::matte(&mut self.session, image),
             other => Err(FaceSwapError::InvalidInput(format!("unknown tool: {other}"))),
         }
     }
