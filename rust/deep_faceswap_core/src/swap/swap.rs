@@ -143,13 +143,19 @@ pub fn swap_single_pair(
 ///
 /// Keyed by file name and box so a different source face is a different entry,
 /// and cleared when a session opens so a changed source cannot be stale.
-static EMBEDDING_CACHE: Mutex<HashMap<String, Vec<f32>>> = Mutex::new(HashMap::new());
+/// Wrapped in an Option because HashMap::new is not const and so cannot be
+/// built directly in a static. A Vec would have been, but a map is the right
+/// shape for a lookup keyed by the face.
+static EMBEDDING_CACHE: Mutex<Option<HashMap<String, Vec<f32>>>> = Mutex::new(None);
 
 /// Forget every cached embedding. Called when a session opens.
 pub fn clear_embedding_cache() {
-    match EMBEDDING_CACHE.lock() {
-        Ok(mut cache) => cache.clear(),
-        Err(poisoned) => poisoned.into_inner().clear(),
+    let mut guard = match EMBEDDING_CACHE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(cache) = guard.as_mut() {
+        cache.clear();
     }
 }
 
@@ -168,9 +174,16 @@ fn source_embedding(
     info: &SourceFaceInfo,
 ) -> Result<Vec<f32>> {
     let key = embedding_key(info);
-    if let Ok(cache) = EMBEDDING_CACHE.lock() {
-        if let Some(hit) = cache.get(&key) {
-            return Ok(hit.clone());
+
+    {
+        let guard = match EMBEDDING_CACHE.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(cache) = guard.as_ref() {
+            if let Some(hit) = cache.get(&key) {
+                return Ok(hit.clone());
+            }
         }
     }
 
@@ -178,8 +191,14 @@ fn source_embedding(
     let source_aligned = alignment::align_face(source_img, &info.face, 112)?;
     let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
 
-    if let Ok(mut cache) = EMBEDDING_CACHE.lock() {
-        cache.insert(key, embedding.clone());
+    {
+        let mut guard = match EMBEDDING_CACHE.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard
+            .get_or_insert_with(HashMap::new)
+            .insert(key, embedding.clone());
     }
     Ok(embedding)
 }
