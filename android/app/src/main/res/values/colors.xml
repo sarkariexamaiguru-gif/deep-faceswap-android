@@ -1,37 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Roop palette. Values are the specification's starting points. -->
+<!--
+  Tasvi palette.
+
+  The token names are the ones the shell already uses, re-pointed at the values the
+  Tasvi specification gives. That is deliberate: every screen in the app reads its
+  colours through these names, so changing the values here re-themes all of them at
+  once, with no screen code touched and no screen able to drift.
+
+  The old values were a glassy pale blue with a cyan-to-violet gradient on every
+  major component. The specification asks for flat neutral surfaces, restrained
+  colour, and large readable type, with the image providing the visual energy. These
+  are those values.
+-->
 <resources>
-    <color name="canvas">#F5F8FF</color>
-    <color name="canvas_cool">#EEF4FF</color>
-
-    <color name="surface">#EBFFFFFF</color>
+    <!-- Surfaces -->
+    <color name="canvas">#FFFFFF</color>
+    <color name="canvas_cool">#F5F6F8</color>
+    <color name="surface">#FFFFFF</color>
     <color name="surface_solid">#FFFFFF</color>
-    <color name="surface_soft">#F2F6FF</color>
-    <color name="surface_selected">#E2EBFF</color>
+    <color name="surface_soft">#F5F6F8</color>
+    <color name="surface_selected">#EEF1FF</color>
+    <color name="surface_hover">#ECEEF2</color>
 
-    <color name="ink">#11172B</color>
-    <color name="ink_secondary">#536181</color>
-    <color name="ink_muted">#7D89A8</color>
+    <!-- Text -->
+    <color name="ink">#17191C</color>
+    <color name="ink_secondary">#5D626B</color>
+    <color name="ink_muted">#737984</color>
 
-    <color name="border">#FFFFFF</color>
-    <color name="border_cool">#D8E2F5</color>
+    <!-- Lines -->
+    <color name="border">#E2E5EA</color>
+    <color name="border_cool">#E2E5EA</color>
 
-    <color name="blue">#1677FF</color>
-    <color name="cyan">#12C8F5</color>
-    <color name="violet">#7955F7</color>
-    <color name="lavender">#E9E4FF</color>
+    <!-- Accent: one solid colour, no gradient on ordinary controls -->
+    <color name="blue">#365CF5</color>
+    <color name="accent">#365CF5</color>
+    <color name="accent_subtle">#EEF1FF</color>
+    <color name="cyan">#365CF5</color>
+    <color name="violet">#365CF5</color>
+    <color name="lavender">#EEF1FF</color>
 
-    <color name="success">#149B76</color>
-    <color name="warning">#B97712</color>
-    <color name="danger">#C93B52</color>
+    <!-- Status -->
+    <color name="success">#13795B</color>
+    <color name="warning">#93620A</color>
+    <color name="danger">#BA3347</color>
 
-    <color name="shadow_tint">#B7C9EE</color>
-
-    <!-- Gradient stops, named separately so drawables stay readable. -->
-    <color name="grad_start">#12C8F5</color>
-    <color name="grad_mid">#1677FF</color>
-    <color name="grad_end">#8055F7</color>
-
-    <!-- Scrim behind labels that sit on top of thumbnails. -->
+    <!-- Effects: shadows are gone; sheets and cards sit flat on the canvas -->
+    <color name="shadow_tint">#00000000</color>
     <color name="scrim">#8C0A0F1F</color>
+
+    <!--
+      The gradient tokens remain because drawables reference them, but they are
+      collapsed to the single accent. The specification is explicit: a cyan-to-violet
+      gradient on every major component is what made the old design look like a
+      template. A small gradient is permitted on the Tasvi mark only.
+    -->
+    <color name="grad_start">#365CF5</color>
+    <color name="grad_mid">#365CF5</color>
+    <color name="grad_end">#365CF5</color>
+
+    <!-- Dark theme, for when the shell supports it -->
+    <color name="dark_background">#101114</color>
+    <color name="dark_surface">#17191D</color>
+    <color name="dark_surface_subtle">#202329</color>
+    <color name="dark_border">#30343B</color>
+    <color name="dark_text">#F4F5F7</color>
+    <color name="dark_text_secondary">#B8BDC7</color>
+    <color name="dark_accent">#8CA2FF</color>
 </resources>

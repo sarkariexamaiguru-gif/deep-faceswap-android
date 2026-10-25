@@ -135,6 +135,7 @@ class MainActivity : Activity() {
 
     private var polling = false
     private var lastStep = ""
+    private val REQ_COMPOSER_PICK = 7411
 
     // ---------------------------------------------------------------- life
 
@@ -214,12 +215,10 @@ class MainActivity : Activity() {
             // "Swap the face" button was.
             bottomMargin = dp(94)
         })
-        root.addView(buildBottomNav(), FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply {
-            gravity = Gravity.BOTTOM
-            bottomMargin = dp(12)
-        })
+        // The floating pill is gone. Navigation is a drawer reached from the
+        // menu button, so the content is the full height of the screen and
+        // nothing can hide underneath a bar that floats over it.
+        root.addView(buildDrawer())
         return root
     }
 
@@ -234,63 +233,303 @@ class MainActivity : Activity() {
      * The Pro crown is gone - there is no paid tier, so a crown button was an
      * advertisement for something that does not exist.
      */
-    private fun buildHeader(): View {
-        val wrap = FrameLayout(this).apply {
-            setPadding(dp(18), dp(10), dp(18), dp(4))
-        }
-        val banner = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = getDrawable(R.drawable.bg_banner)
-            elevation = dp(5).toFloat()
-            setPadding(dp(15), dp(15), dp(11), dp(15))
+    /**
+     * The Tasvi app bar.
+     *
+     * 56 dp, flat, with a menu button on the left, the mark and wordmark, and a
+     * model chip on the right. It replaces a gradient banner carrying two glass
+     * buttons and a tagline.
+     *
+     * The specification is explicit about why. A large gradient banner is
+     * decoration competing with the work, and the chip has to show a truthful
+     * state - a real model or "Choose a model" - never a fixed label that claims
+     * something the device may not have.
+     */
+    // ------------------------------------------------------------- tasvi shell
+
+    private var drawer: View? = null
+    private var drawerOpen = false
+
+    /** A square icon control for the app bar. */
+    private fun barIcon(iconRes: Int, label: String, size: Int, onClick: () -> Unit): View =
+        FrameLayout(this).apply {
+            background = getDrawable(R.drawable.bg_glass_circle)
+            isClickable = true
+            contentDescription = label
+            layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
+            addView(RoopUi.iconView(this@MainActivity, iconRes, 20, R.color.ink_secondary).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(20), dp(20)).apply {
+                    gravity = Gravity.CENTER
+                }
+            })
+            setOnClickListener { onClick() }
         }
 
-        banner.addView(FrameLayout(this).apply {
-            background = getDrawable(R.drawable.bg_glass_tile)
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
-            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_flask, 25,
+    /** What the model chip should truthfully say. */
+    private fun modelChipLines(): List<String> = runCatching {
+        listOf(
+            models.summaryLine(),
+            "The app picks the best installed model for the job.",
+            "Open Models to download more or choose yourself.",
+        )
+    }.getOrDefault(listOf("Open Models to download one."))
+
+    private fun toggleDrawer() {
+        drawerOpen = !drawerOpen
+        drawer?.visibility = if (drawerOpen) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * The navigation drawer.
+     *
+     * It replaces a floating pill bar. Every destination in the specification is
+     * here, one tap from anywhere, and the content keeps the whole screen - which
+     * is the point of the change: the bar floated over the work and the last
+     * control on every screen sat underneath it.
+     */
+    private fun buildDrawer(): View {
+        val scrim = FrameLayout(this).apply {
+            setBackgroundColor(getColor(R.color.scrim))
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener { toggleDrawer() }
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(getColor(R.color.surface_solid))
+            setPadding(dp(8), dp(20), dp(8), dp(16))
+            layoutParams = FrameLayout.LayoutParams(dp(280), ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+
+        panel.addView(drawerHeader())
+        panel.addView(drawerItem("New chat", R.drawable.ic_sparkle) { toggleDrawer(); show("home") })
+        panel.addView(drawerItem("Library", R.drawable.ic_history) { toggleDrawer(); show("history") })
+        panel.addView(drawerItem("Tools", R.drawable.ic_tools) { toggleDrawer(); show("tools") })
+        panel.addView(drawerItem("Models", R.drawable.ic_cube) { toggleDrawer(); show("models") })
+        panel.addView(drawerItem("Face swap", R.drawable.ic_swap) { toggleDrawer(); show("swap") })
+        panel.addView(drawerItem("Video", R.drawable.ic_video) { toggleDrawer(); show("video") })
+
+        panel.addView(View(this).apply {
+            setBackgroundColor(getColor(R.color.border))
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(1), 12, 14, 12, 12)
+        })
+        panel.addView(drawerItem("Settings", R.drawable.ic_settings) {
+            toggleDrawer(); show("settings")
+        })
+        panel.addView(drawerItem("Diagnostics", R.drawable.ic_chip) {
+            toggleDrawer(); show("tools")
+        })
+
+        scrim.addView(panel)
+        drawer = scrim
+        return scrim
+    }
+
+    private fun drawerHeader(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), 0, dp(12), dp(18))
+        addView(FrameLayout(this@MainActivity).apply {
+            background = getDrawable(R.drawable.bg_glass_circle)
+            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
+            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_flask, 19,
                 R.color.surface_solid).apply {
-                layoutParams = FrameLayout.LayoutParams(dp(25), dp(25)).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(19), dp(19)).apply {
                     gravity = Gravity.CENTER
                 }
             })
         })
-
-        val brand = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 13, 0, 0, 0)
-        }
-        brand.addView(TextView(this).apply {
-            text = getString(R.string.app_name)
-            textSize = 21f
-            setTextColor(getColor(R.color.surface_solid))
+        addView(TextView(this@MainActivity).apply {
+            text = "Tasvi"
+            textSize = 18f
+            setTextColor(getColor(R.color.ink))
             setTypeface(typeface, Typeface.BOLD)
+            layoutParams = RoopUi.margin(this@MainActivity,
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                10, 0, 0, 0)
         })
-        val sub = LinearLayout(this).apply {
+    }
+
+    private fun drawerItem(label: String, iconRes: Int, onClick: () -> Unit): View =
+        LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            contentDescription = label
+            setPadding(dp(12), dp(13), dp(12), dp(13))
+            addView(RoopUi.iconView(this@MainActivity, iconRes, 20, R.color.ink_secondary))
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 15f
+                setTextColor(getColor(R.color.ink))
+                layoutParams = RoopUi.margin(this@MainActivity,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    16, 0, 0, 0)
+            })
+            setOnClickListener { onClick() }
         }
-        sub.addView(TextView(this).apply {
-            text = getString(R.string.tagline)
-            textSize = 11.5f
-            setTextColor(0xCCFFFFFF.toInt())
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+
+    /**
+     * The smart composer.
+     *
+     * 24 dp radius, 56 dp minimum, a plus on the left, a mode selector and an
+     * options row beneath, and a solid accent send button on the right. The
+     * specification asks for a normal anchored surface, not a floating capsule
+     * with a large shadow, and for the send action to be a solid accent rather
+     * than a gradient.
+     */
+    private fun buildComposer(): View {
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(getColor(R.color.canvas))
+            setPadding(dp(16), dp(8), dp(16), dp(12))
+        }
+
+        val field = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = getDrawable(R.drawable.bg_composer)
+            setPadding(dp(10), dp(8), dp(8), dp(8))
+        }
+        field.addView(barIcon(R.drawable.ic_plus, "Add a photo", 40) { pickPhotoForComposer() })
+        field.addView(EditText(this).apply {
+            hint = "Describe what you want\u2026"
+            textSize = 16f
+            setHintTextColor(getColor(R.color.ink_muted))
+            setTextColor(getColor(R.color.ink))
+            background = null
+            maxLines = 5
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(4); marginEnd = dp(4)
+            }
         })
-        // The Private pill used to sit here. A third button needs the width, and
-        // the same promise is already on Home in full - "Every tool runs on this
-        // phone. Nothing is uploaded." - so the pill was the one that could go.
-        brand.addView(sub)
-        banner.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        field.addView(FrameLayout(this).apply {
+            background = getDrawable(R.drawable.bg_glass_circle)
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_arrow_up, 20,
+                R.color.surface_solid).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(20), dp(20)).apply {
+                    gravity = Gravity.CENTER
+                }
+            })
+            isClickable = true
+            contentDescription = "Send"
+            setOnClickListener { toast("Describe what you want first.") }
+        })
+        wrap.addView(field)
 
-        banner.addView(glassButton(R.drawable.ic_history, "History") { show("history") })
-        banner.addView(glassButton(R.drawable.ic_settings, "Settings") { show("settings") })
-        banner.addView(glassButton(R.drawable.ic_dots, "More options") { showOverflow() })
-
-        wrap.addView(banner)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0)
+        }
+        row.addView(smallChip("Edit \u25be") { toast("Edit mode") })
+        row.addView(smallChip("Options") { showSheet("Options", listOf(
+            "Pixel boost, restore strength and colour match live here.",
+            "They apply to whichever tool you run next."), -1, null) { } })
+        wrap.addView(row)
         return wrap
+    }
+
+    private fun smallChip(label: String, onClick: () -> Unit): View =
+        TextView(this).apply {
+            text = label
+            textSize = 14f
+            setTextColor(getColor(R.color.ink_secondary))
+            setTypeface(typeface, Typeface.BOLD)
+            background = getDrawable(R.drawable.bg_chip_soft)
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            isClickable = true
+            layoutParams = RoopUi.margin(this@MainActivity,
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                0, 0, 8, 0)
+            setOnClickListener { onClick() }
+        }
+
+    private fun pickPhotoForComposer() {
+        runCatching {
+            startActivityForResult(
+                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "image/*"
+                },
+                REQ_COMPOSER_PICK,
+            )
+        }
+    }
+
+    private fun buildHeaderMarker(): Unit = Unit
+
+    private fun buildHeader(): View {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(getColor(R.color.canvas))
+            setPadding(dp(8), 0, dp(8), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(56),
+            )
+        }
+
+        bar.addView(barIcon(R.drawable.ic_dots, "Open navigation", 40) { toggleDrawer() })
+
+        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = RoopUi.margin(this@MainActivity,
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                4, 0, 0, 0)
+        }
+        brand.addView(FrameLayout(this).apply {
+            background = getDrawable(R.drawable.bg_glass_circle)
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
+            addView(RoopUi.iconView(this@MainActivity, R.drawable.ic_flask, 17,
+                R.color.surface_solid).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(17), dp(17)).apply {
+                    gravity = Gravity.CENTER
+                }
+            })
+        })
+        brand.addView(TextView(this).apply {
+            text = "Tasvi"
+            textSize = 17f
+            setTextColor(getColor(R.color.ink))
+            setTypeface(typeface, Typeface.BOLD)
+            layoutParams = RoopUi.margin(this@MainActivity,
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                8, 0, 0, 0)
+        })
+        bar.addView(brand, RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        // The model chip. A truthful state, not a marketing label.
+        bar.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = getDrawable(R.drawable.bg_chip_soft)
+            isClickable = true
+            contentDescription = "Choose a model"
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(32),
+            )
+            addView(TextView(this@MainActivity).apply {
+                text = "On-device"
+                textSize = 12f
+                setTextColor(getColor(R.color.ink_secondary))
+                setTypeface(typeface, Typeface.BOLD)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            setOnClickListener { showSheet("Model", modelChipLines(), -1, null) { } }
+        })
+        return bar
     }
 
     /** A translucent round button, for use on the banner. */
@@ -1046,158 +1285,123 @@ class MainActivity : Activity() {
      * It opens on everything it can do now: the finished tools first, and the
      * rest labelled honestly rather than hidden.
      */
+    /**
+     * Screen A - the chat home.
+     *
+     * A welcome, four compact suggestions, and the composer. Not a grid.
+     *
+     * The specification is blunt about this one: the empty state must feel like
+     * an LLM composer, and a two-column grid of oversized cards is what it
+     * replaced. Suggestions are compact rows, and a suggestion for a tool whose
+     * model is missing still opens the flow - it just reaches a truthful
+     * download state before it tries to run.
+     */
     private fun buildHomeScreen(): View {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(RoopUi.screenTitle(this, "What are we making?"))
-        col.addView(RoopUi.body(this, "Every tool runs on this phone. Nothing is uploaded.")
-            .apply {
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+            )
+        }
+        val inner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(28), dp(16), dp(8))
+        }
+
+        inner.addView(TextView(this).apply {
+            text = "What should we make?"
+            textSize = 26f
+            setTextColor(getColor(R.color.ink))
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        })
+        inner.addView(TextView(this).apply {
+            text = "Describe an edit, or add a photo to begin."
+            textSize = 14f
+            setTextColor(getColor(R.color.ink_secondary))
+            gravity = Gravity.CENTER
+            layoutParams = RoopUi.margin(this@MainActivity,
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                0, 8, 0, 24)
+        })
+
+        listOf(
+            "Remove the background and keep the edges natural." to "Cut out",
+            "Restore this old photo while preserving the faces." to "Restore",
+            "Make this image sharper without changing its colours." to "Sharpen",
+            "Turn these frames into a GIF." to "GIF",
+        ).forEach { (prompt, label) ->
+            inner.addView(suggestionCard(prompt, label))
+        }
+
+        val recent = runCatching {
+            history.filter("all", favoritesOnly = false, query = "", sort = "recent").take(3)
+        }.getOrDefault(emptyList())
+        if (recent.isNotEmpty()) {
+            inner.addView(TextView(this).apply {
+                text = "Continue where you left off"
+                textSize = 12f
+                setTextColor(getColor(R.color.ink_muted))
+                layoutParams = RoopUi.margin(this@MainActivity,
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    0, 22, 0, 10)
+            })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            recent.forEach { item ->
+                row.addView(FrameLayout(this).apply {
+                    background = getDrawable(R.drawable.bg_glass_tile)
+                    isClickable = true
+                    layoutParams = RoopUi.margin(this@MainActivity, 0, dp(84), 0, 0, 8, 0)
+                    layoutParams = RoopUi.weight(dp(84), dp(84), 1f)
+                    setOnClickListener { show("history") }
+                })
+            }
+            inner.addView(row)
+        }
+
+        scroll.addView(inner)
+        col.addView(scroll)
+        col.addView(buildComposer())
+        return col
+    }
+
+    /**
+     * A suggestion. Compact and typographic, not a card with an icon tile and a
+     * two-line subtitle competing for the same space.
+     */
+    private fun suggestionCard(prompt: String, label: String): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = getDrawable(R.drawable.bg_suggestion)
+            isClickable = true
+            contentDescription = prompt
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            layoutParams = RoopUi.margin(this@MainActivity, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 0, 8)
+            addView(TextView(this@MainActivity).apply {
+                text = prompt
+                textSize = 14f
+                setTextColor(getColor(R.color.ink_secondary))
+                layoutParams = RoopUi.weight(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 12f
+                setTextColor(getColor(R.color.blue))
+                setTypeface(typeface, Typeface.BOLD)
                 layoutParams = RoopUi.margin(this@MainActivity,
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                    0, 4, 0, 4)
+                    10, 0, 0, 0)
             })
+            setOnClickListener {
+                // Truthful: it opens the flow, and the flow checks the model.
+                show("tools")
+            }
+        }
 
-        col.addView(homeSection("Ready now"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_sliders, "Edit a photo", "Crop, light, colour, sharpen", true) {
-                startActivity(Intent(this@MainActivity, EditActivity::class.java))
-            },
-            homeTile(R.drawable.ic_swap, "Face Swap", "One face onto another", true) {
-                show("swap")
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_video, "Swap a video", "Frame by frame, audio kept", true) {
-                show("video")
-            },
-            null,
-        ))
-
-        col.addView(homeSection("Fix and sharpen"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_hd, "Upscale", "4x, sharper edges", true) {
-                startActivity(Intent(this@MainActivity, UpscaleActivity::class.java))
-            },
-            homeTile(R.drawable.ic_sparkle, "Remove blur", "Soft and motion-blurred shots", false) {
-                notYet("Remove blur")
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_filter, "Denoise", "Grain and phone noise", true) {
-                startActivity(
-                    ToolActivity.intent(
-                        this@MainActivity, "denoise", "Denoise", "Remove grain and sensor noise.",
-                        ModelManager.SCUNET_FILE, 1,
-                    ),
-                )
-            },
-            homeTile(R.drawable.ic_chip, "De-JPEG", "Erase JPEG blocking", true) {
-                startActivity(
-                    ToolActivity.intent(
-                        this@MainActivity, "dejpeg", "De-JPEG", "Erase JPEG blocking and mush.",
-                        ModelManager.OMNI_FILE, 1,
-                    ),
-                )
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_star, "Sharpen", "Crisper edges", false) { notYet("Sharpen") },
-            homeTile(R.drawable.ic_heart, "Restore", "Old photos, faces and detail", false) {
-                notYet("Restore")
-            },
-        ))
-
-        col.addView(homeSection("Cut and erase"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_person, "Cut out", "Drop the background", true) {
-                startActivity(
-                    ToolActivity.intent(
-                        this@MainActivity, "cutout", "Cut out",
-                        "Drop the background and keep the subject.",
-                        ModelManager.BIREFNET_FILE, 1,
-                    ),
-                )
-            },
-            homeTile(R.drawable.ic_image, "Swap background", "Put the subject elsewhere", false) {
-                notYet("Swap background")
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_trash, "Erase", "Paint it out, it fills in", false) {
-                notYet("Erase")
-            },
-            homeTile(R.drawable.ic_scan, "Select", "Tap an object to mask it", false) {
-                notYet("Select")
-            },
-        ))
-
-        col.addView(homeSection("Colour"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_palette, "Colourise", "Black and white to colour", false) {
-                notYet("Colourise")
-            },
-            homeTile(R.drawable.ic_chip, "Auto colour", "Fix a cast, lift a dull shot", false) {
-                notYet("Auto colour")
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_shield, "Colour match", "Blend a face into its frame", true) {
-                show("swap")
-            },
-            null,
-        ))
-
-        col.addView(homeSection("Change"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_sort, "Crop and rotate", "Frame it, level it", true) {
-                startActivity(Intent(this@MainActivity, EditActivity::class.java))
-            },
-            homeTile(R.drawable.ic_cube, "Resize", "Exact pixel dimensions", true) {
-                startActivity(Intent(this@MainActivity, EditActivity::class.java))
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_filter, "Filters", "13 one-tap looks", true) {
-                startActivity(Intent(this@MainActivity, EditActivity::class.java))
-            },
-            homeTile(R.drawable.ic_sort, "Straighten", "Level a tilted horizon", true) {
-                startActivity(Intent(this@MainActivity, EditActivity::class.java))
-            },
-        ))
-
-        col.addView(homeSection("People"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_person, "Skin", "Smooth tone, keep texture", false) {
-                notYet("Skin")
-            },
-            homeTile(R.drawable.ic_scan, "Eyes", "Brighten and sharpen", false) { notYet("Eyes") },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_star, "Teeth", "Whiten, without going blue", false) {
-                notYet("Teeth")
-            },
-            homeTile(R.drawable.ic_sliders, "Reshape", "Jaw, nose, waist, height", false) {
-                notYet("Reshape")
-            },
-        ))
-
-        col.addView(homeSection("Video"))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_hd, "Video upscale", "Upscale a whole clip", false) {
-                notYet("Video upscale")
-            },
-            homeTile(R.drawable.ic_video, "Video background", "Cut or swap a clip's backdrop", false) {
-                notYet("Video background")
-            },
-        ))
-        col.addView(homeRow(
-            homeTile(R.drawable.ic_gif, "GIF maker", "Turn frames into an animation", false) {
-                notYet("GIF maker")
-            },
-            null,
-        ))
-
-        return scrollPage(col)
-    }
 
     /**
      * Models: everything the app can run, in one list.
