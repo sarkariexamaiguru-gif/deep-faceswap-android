@@ -133,6 +133,31 @@ pub fn swap_single_pair(
     )
 }
 
+/// What the engine is doing right now, in words.
+///
+/// A panic inside ONNX Runtime arrives as an opaque payload with no message, so
+/// the only way to place it is to know which step was running. This is set
+/// immediately before each model load and each phase, and read from outside.
+static STEP: Mutex<Option<String>> = Mutex::new(None);
+
+/// Record the current step. Called immediately before the work it names.
+pub fn set_step(text: &str) {
+    let mut guard = match STEP.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *guard = Some(text.to_string());
+}
+
+/// The current step, or an empty string.
+pub fn step() -> String {
+    let guard = match STEP.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.clone().unwrap_or_default()
+}
+
 /// Source embeddings, keyed by the face they came from.
 ///
 /// A source embedding depends on the source face and on nothing else - not the
@@ -1787,9 +1812,13 @@ impl SwapSession {
         landmark_model: Option<&str>,
         use_mouth_mask: bool,
     ) -> Result<Self> {
+        crate::swap::set_step("loading the face detector");
         let mut detector = FaceDetector::new(detector_model)?;
+        crate::swap::set_step("loading the face recogniser");
         let recognizer = FaceRecognizer::new(recognizer_model)?;
+        crate::swap::set_step("loading the swapper");
         let swapper = FaceSwapper::new(swapper_model)?;
+        crate::swap::set_step("loading the restorer");
         let enhancer = enhancer_model
             .map(|path| FaceEnhancer::new(path))
             .transpose()?;
@@ -1805,6 +1834,7 @@ impl SwapSession {
         };
 
         let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+        crate::swap::set_step("reading the source images");
         let mut source_images: Vec<Array3<u8>> = Vec::new();
         let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
 

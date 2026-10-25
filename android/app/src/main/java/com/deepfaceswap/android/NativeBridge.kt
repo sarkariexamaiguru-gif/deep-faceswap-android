@@ -323,6 +323,8 @@ object NativeBridge {
 
     private external fun checkModelNative(path: String): String
 
+    private external fun stepNative(): String
+
     private external fun setLandmarkModelNative(path: String): String
 
     private external fun setInterpolationNative(path: String): String
@@ -542,6 +544,9 @@ object NativeBridge {
     fun resetTimeline() {
         runCatching { resetTimelineNative() }
     }
+
+    /** What the engine is doing right now, in words. Empty when idle. */
+    fun step(): String = runCatching { stepNative() }.getOrDefault("")
 
     /** Every frame's numbers for the current job, as JSON. */
     fun qualityTimeline(): String =

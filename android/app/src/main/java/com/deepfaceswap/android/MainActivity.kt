@@ -134,6 +134,7 @@ class MainActivity : Activity() {
     private lateinit var storageRow: LinearLayout
 
     private var polling = false
+    private var lastStep = ""
 
     // ---------------------------------------------------------------- life
 
@@ -3210,7 +3211,17 @@ class MainActivity : Activity() {
     }
 
     private fun startPolling() {
+        // The engine's own words for what it is doing. A panic inside ONNX
+        // Runtime arrives with no message, so this is the only way to place it -
+        // and it is written the moment it changes, not after.
+        lastStep = ""
+
         polling = true
+            val now = NativeBridge.step()
+            if (now.isNotEmpty() && now != lastStep) {
+                lastStep = now
+                DebugLog.add("engine", now)
+            }
         io.post(pollRunnable)
     }
 

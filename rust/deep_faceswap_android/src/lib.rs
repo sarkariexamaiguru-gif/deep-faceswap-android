@@ -1135,6 +1135,22 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_checkModelNati
     }
 }
 
+/// What the engine is doing right now, in words.
+///
+/// A panic inside ONNX Runtime arrives with no message, so knowing which step
+/// was running is the only way to place it.
+#[no_mangle]
+pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_stepNative(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let payload = deep_faceswap_core::swap::step();
+    match env.new_string(payload) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// The quality report for the most recent frame, as JSON.
 #[no_mangle]
 pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_qualityReportNative(
