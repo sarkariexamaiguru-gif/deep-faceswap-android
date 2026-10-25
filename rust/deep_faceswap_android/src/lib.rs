@@ -194,7 +194,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImage(
         }
         Err(payload) => {
             STAGE.store(-1, Ordering::SeqCst);
-            serde_json::json!({ "ok": false, "error": format!("native panic during face swap: {}", panic_message(&payload)) })
+            serde_json::json!({ "ok": false, "error": format!("native panic during face swap while {}: {}", deep_faceswap_core::swap::step(), panic_message(&payload)) })
             .to_string()
         }
     };
@@ -372,7 +372,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapImageMappe
         }
         Err(payload) => {
             STAGE.store(-1, Ordering::SeqCst);
-            serde_json::json!({ "ok": false, "error": format!("native panic during face swap: {}", panic_message(&payload)) })
+            serde_json::json!({ "ok": false, "error": format!("native panic during face swap while {}: {}", deep_faceswap_core::swap::step(), panic_message(&payload)) })
             .to_string()
         }
     };
@@ -469,7 +469,7 @@ pub extern "system" fn Java_com_deepfaceswap_android_NativeBridge_swapAnimation(
         }
         Err(payload) => {
             STAGE.store(-1, Ordering::SeqCst);
-            serde_json::json!({ "ok": false, "error": format!("native panic during animation swap: {}", panic_message(&payload)) })
+            serde_json::json!({ "ok": false, "error": format!("native panic during animation swap while {}: {}", deep_faceswap_core::swap::step(), panic_message(&payload)) })
             .to_string()
         }
     };
